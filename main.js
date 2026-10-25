@@ -20,7 +20,7 @@ const { URL } = require('url');
 const { spawn } = require('child_process');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.4.7';
+const VERSION = '2.4.8';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */

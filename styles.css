@@ -512,10 +512,6 @@
 
 .aip-model-btn {
   font-size: 0.7rem;
-  max-width: 110px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   padding: 2px 10px;
   height: auto;
   line-height: 1.7;

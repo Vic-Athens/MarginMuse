@@ -56,6 +56,7 @@ MarginMuse has no telemetry and does not include ads.
 - Web search queries are sent to Bing and, when a reliable fallback is needed, Baidu, Sogou, or 360.
 - `web_fetch` requests the URL supplied by the user or requested through the model.
 - Optional MCP servers may start local processes and may access resources according to their own configuration.
+- Copying an assistant reply writes its text to the system clipboard.
 - API keys and settings are stored locally in the plugin's `data.json`.
 
 Review the privacy policies of the AI, search, and MCP services you choose to use.
