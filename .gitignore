@@ -1,0 +1,6 @@
+data.json
+index-cache.json
+node_modules/
+*.log
+.DS_Store
+Thumbs.db

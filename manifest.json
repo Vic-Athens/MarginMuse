@@ -1,0 +1,9 @@
+{
+  "id": "marginmuse",
+  "name": "MarginMuse",
+  "version": "2.4.7",
+  "minAppVersion": "1.4.0",
+  "description": "An AI writing, research, and vault assistant with chat, tools, Canvas, web search, and MCP support.",
+  "author": "xiongfeng19",
+  "isDesktopOnly": true
+}
