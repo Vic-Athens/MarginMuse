@@ -1386,3 +1386,52 @@
   line-height: 1.55;
   resize: vertical;
 }
+
+.aip-agent-picker-modal {
+  width: min(520px, calc(100vw - 40px));
+}
+
+.aip-agent-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 55vh;
+  margin-top: 12px;
+  overflow-y: auto;
+}
+
+.aip-agent-pick-item {
+  padding: 12px 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: var(--background-secondary);
+  cursor: pointer;
+}
+
+.aip-agent-pick-item:hover {
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+
+.aip-agent-pick-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.aip-agent-pick-default {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.aip-agent-pick-desc {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.5;
+}

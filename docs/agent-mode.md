@@ -25,6 +25,8 @@ No Agent profile is created automatically.
 
 Each chat session stores its own `agentId`. Changing the default Agent in settings does not rewrite existing sessions. Switching Agents starts a new conversation so persona, memory, and task state do not leak between identities.
 
+With Agent mode enabled, creating a new session opens an Agent picker. The session history displays its bound Agent. With Agent mode disabled, both controls remain hidden and the original new-session behavior is used.
+
 ## Loading order
 
 1. Hard security and tool permissions.

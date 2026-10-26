@@ -158,7 +158,9 @@ Agent mode may substantially increase token usage because it loads persona, resp
 
 Files can be edited from **Settings → MarginMuse → Agent**. If **Allow Agent self-edit** is enabled, the Agent can request changes to its identity, memories, or user profile. Every such write requires confirmation.
 
-Each chat session stores its own immutable `agentId`. The Agent selected in settings is only the default for new sessions; changing it does not switch an existing conversation. Use **Start a new chat with this Agent** to move to another Agent without mixing their persona, memory, or task state.
+Each chat session stores its own immutable `agentId`. The Agent selected in settings is only the default for new sessions; changing it does not switch an existing conversation. Start a new conversation and select another Agent to avoid mixing persona, memory, or task state.
+
+When Agent mode is enabled, both the ribbon/chat New conversation action and the **New chat** command open an Agent picker before creating the session. Session history shows the bound Agent only while Agent mode is enabled.
 
 See [Agent mode files](docs/agent-mode.md) for loading priority and safety rules.
 
