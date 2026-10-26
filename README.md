@@ -92,6 +92,10 @@ MarginMuse Skills/
 
 `SKILL.md` uses frontmatter with at least `name` and `description`. Activate a Skill from the chat header. It applies only to the current chat session.
 
+To create a Skill, open **Settings → MarginMuse → Skills** and select **Let AI create a Skill**. MarginMuse starts a dedicated Skill Builder conversation with a prefilled request. Describe the desired workflow and the AI saves a complete `SKILL.md` through the restricted `write_skill` tool. The AI may ask follow-up questions before writing.
+
+The `write_skill` tool is available only during Skill Builder conversations, never in ordinary chat sessions.
+
 ## 中文说明
 
 MarginMuse（页语）是一款面向 Obsidian 的双语 AI 写作与笔记助手，支持多会话、笔记上下文、文件工具、Canvas 白板、联网搜索和 MCP。
@@ -104,6 +108,7 @@ MarginMuse（页语）是一款面向 Obsidian 的双语 AI 写作与笔记助�
 - 本地 MCP 服务会以 Obsidian 进程的权限运行，请只连接可信服务。
 - 本地复杂任务 Agent 默认停用，每次调用前会要求确认。
 - Skill 可以由用户自行创建，插件不内置默认 Skill，也不会自动执行 Skill scripts。
+- 在 Skills 设置里点击「让 AI 创建 Skill」，填写需求后由 AI 生成并保存 SKILL.md，不需要手动创建文件。
 - API Key 保存在本地插件目录的 `data.json` 中。
 
 ## Development
