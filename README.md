@@ -27,6 +27,8 @@
 
 MarginMuse is desktop-only because it uses Node.js APIs for streaming requests and MCP processes.
 
+New installations start with both MCP tools and web access disabled. Core vault and Canvas tools remain available independently.
+
 ## Installation
 
 Once accepted into the Obsidian Community directory, search for **MarginMuse** in:

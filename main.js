@@ -23,7 +23,7 @@ const nodePath = require('path');
 const os = require('os');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.5.2';
+const VERSION = '2.5.3';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -278,8 +278,8 @@ const DEFAULT_SETTINGS = {
     '<<<CHOICE\n{"question":"要执行哪个？","multiple":false,"allowCustom":true,"options":[{"label":"选项A文字","value":"A的实际回复内容"},{"label":"选项B文字","value":"B的实际回复内容"}]}\n>>>\n' +
     'multiple 为 true 时是多选，allowCustom 为 true 时显示自定义输入框。options 的 value 是用户点选后实际发给你的内容，要写完整。只在有明确分支选择时用，不要滥用。',
   includeCurrentFile: true,
-  enableTools: true,
-  enableWebTools: true,
+  enableTools: false,
+  enableWebTools: false,
   webEngines: ['bing'],
   /* 自定义搜索源：{ id, name, method, url, headers, body, note }，url/body 里用 {q} 占位 */
   customEngines: [],
@@ -5768,7 +5768,7 @@ class AIChatProPlugin extends Plugin {
     this.index = new VaultIndex(this);
     this.mcp = new McpManager(this);
     this.skills = new SkillStore(this);
-    if (this._removedLegacyTemplates) await this.saveSettings();
+    if (this._removedLegacyTemplates || this._migratedSkillRoot) await this.saveSettings();
 
     this.registerView(VIEW_TYPE, (leaf) => new ChatView(leaf, this));
 
@@ -5996,6 +5996,8 @@ class AIChatProPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
     this._removedLegacyTemplates = Object.prototype.hasOwnProperty.call(this.settings, 'templates');
     if (this._removedLegacyTemplates) delete this.settings.templates;
+    this._migratedSkillRoot = this.settings.skillRoot === 'MarginMuse Skills';
+    if (this._migratedSkillRoot) this.settings.skillRoot = '.obsidian/marginmuse/skills';
     // 兼容旧数据：补齐新增字段
     if (!Array.isArray(this.settings.providers)) this.settings.providers = [];
     if (!Array.isArray(this.settings.models)) this.settings.models = [];
