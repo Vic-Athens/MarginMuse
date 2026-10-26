@@ -101,9 +101,9 @@ Trusted local Agents can call:
 - `bridge_active_note`: active note metadata and optional text.
 - `bridge_search_vault`: search Markdown notes.
 - `bridge_read_note`: read a permitted vault note.
-- `bridge_write_result`: request an append or write, which always requires user confirmation in MarginMuse.
+- `bridge_write_result`: request an append or write inside the configured Agent output folder, with a content preview and hash in the confirmation dialog.
 
-The Bridge does not expose API keys, `data.json`, plugin configuration, or hidden-directory traversal.
+The Bridge does not expose API keys, `data.json`, plugin configuration, or hidden-directory traversal. Writes are confined to **Settings → MarginMuse → Bridge → Agent output folder**, defaulting to `MarginMuse Agent Output`.
 
 ## Skills
 

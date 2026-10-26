@@ -24,7 +24,7 @@ const os = require('os');
 const crypto = require('crypto');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.7.0';
+const VERSION = '2.7.1';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -295,6 +295,7 @@ const DEFAULT_SETTINGS = {
     enabled: false,
     port: 32145,
     token: '',
+    writeRoot: 'MarginMuse Agent Output',
   },
   skillRoot: '.obsidian/marginmuse/skills',
   sessions: [],
@@ -1672,16 +1673,36 @@ class BridgeServer {
   }
 
   async writeResult(args) {
+    const writeRoot = normToolPath(
+      (this.plugin.settings.bridge && this.plugin.settings.bridge.writeRoot) ||
+        'MarginMuse Agent Output'
+    );
     let path = normToolPath(args.path);
+    if (path !== writeRoot && !path.startsWith(writeRoot + '/')) {
+      path = writeRoot + '/' + path;
+    } else if (path === writeRoot) {
+      path = writeRoot + '/agent-result';
+    }
     if (!/\.md$/i.test(path)) path += '.md';
     const content = String(args.content || '');
     if (!content.trim()) throw new Error('写回内容不能为空');
     if (content.length > 200000) throw new Error('写回内容超过 200000 字');
     const append = args.append === true;
     const existing = this.plugin.app.vault.getAbstractFileByPath(path);
+    const digest = crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
     const ok = await this.plugin.tools.confirmCard(
       '本地 Agent 写回笔记？',
-      path + '\n\n方式：' + (append ? '追加' : '覆盖/创建') + '\n内容长度：' + content.length
+      path +
+        '\n\n允许目录：' +
+        writeRoot +
+        '\n方式：' +
+        (append ? '追加' : '覆盖/创建') +
+        '\n内容长度：' +
+        content.length +
+        ' 字\nSHA-256：' +
+        digest +
+        '\n\n内容预览：\n' +
+        truncate(content, 1200)
     );
     if (!ok) return 'User rejected the write.';
     if (existing) {
@@ -2315,8 +2336,8 @@ class VaultTools {
     return '已保存 Skill：' + saved.name + '\n路径：' + saved.path;
   }
 
-  async activateSkill(args) {
-    const view = this.plugin.activeChatView();
+  async activateSkill(args, callerView) {
+    const view = callerView || this.plugin.activeChatView();
     if (!view) return '无法确定当前聊天会话';
     const skill = this.plugin.skills.find(args.name);
     if (!skill) return '没有找到匹配的 Skill：' + String(args.name || '');
@@ -2336,15 +2357,15 @@ class VaultTools {
     );
   }
 
-  async listSkillFiles() {
-    const skillPath = this.plugin.skills.activePath();
+  async listSkillFiles(callerView) {
+    const skillPath = this.plugin.skills.activePath(callerView);
     if (!skillPath) return '当前没有激活的 Skill';
     const files = this.plugin.skills.listBundleFiles(skillPath);
     return files.length ? files.join('\n') : '这个 Skill 只有 SKILL.md';
   }
 
-  async readSkillFile(args) {
-    const skillPath = this.plugin.skills.activePath();
+  async readSkillFile(args, callerView) {
+    const skillPath = this.plugin.skills.activePath(callerView);
     if (!skillPath) return '当前没有激活的 Skill';
     const rel = String(args.path || '').trim();
     if (!rel) return '缺少 Skill 文件路径';
@@ -2721,7 +2742,7 @@ class VaultTools {
     return '白板已更新：' + p + '\n' + (done.length ? done.join('、') : '没有实际改动');
   }
 
-  async run(name, args) {
+  async run(name, args, callerView) {
     switch (name) {
       case 'list_dir':
         return this.listDir(args);
@@ -2730,11 +2751,11 @@ class VaultTools {
       case 'write_skill':
         return this.writeSkill(args);
       case 'activate_skill':
-        return this.activateSkill(args);
+        return this.activateSkill(args, callerView);
       case 'list_skill_files':
-        return this.listSkillFiles();
+        return this.listSkillFiles(callerView);
       case 'read_skill_file':
-        return this.readSkillFile(args);
+        return this.readSkillFile(args, callerView);
       case 'read_file':
         return this.readFile(args);
       case 'write_file':
@@ -3120,6 +3141,16 @@ class SkillStore {
     return [nodePath.resolve(this.resolveRoot())];
   }
 
+  assertRealPathInside(root, target) {
+    const rootReal = fs.realpathSync(root);
+    const targetReal = fs.realpathSync(target);
+    const prefix = rootReal.endsWith(nodePath.sep) ? rootReal : rootReal + nodePath.sep;
+    if (targetReal !== rootReal && !targetReal.startsWith(prefix)) {
+      throw new Error('Skill 路径通过符号链接越界');
+    }
+    return targetReal;
+  }
+
   readSkillFile(filePath) {
     const stat = fs.statSync(filePath);
     if (stat.size > 512 * 1024) throw new Error('SKILL.md 超过 512 KB');
@@ -3176,6 +3207,7 @@ class SkillStore {
           walk(full, depth + 1);
         } else if (entry.isFile() && entry.name === 'SKILL.md') {
           try {
+            this.assertRealPathInside(root, full);
             out.push(this.parseSkill(this.readSkillFile(full), full));
           } catch (e) {
             /* Ignore an unreadable skill and continue scanning. */
@@ -3201,7 +3233,8 @@ class SkillStore {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  activePath() {
+  activePath(view) {
+    if (view && view.session && view.session.skillPath) return view.session.skillPath;
     const leaves = this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE);
     for (const leaf of leaves) {
       if (leaf.view instanceof ChatView && leaf.view.session && leaf.view.session.skillPath) {
@@ -3240,7 +3273,12 @@ class SkillStore {
         if (entry.isDirectory()) {
           walk(full, depth + 1);
         } else if (entry.isFile()) {
-          out.push(nodePath.relative(root, full).replace(/\\/g, '/'));
+          try {
+            this.assertRealPathInside(root, full);
+            out.push(nodePath.relative(root, full).replace(/\\/g, '/'));
+          } catch (e) {
+            /* Skip files that resolve outside the Skill directory. */
+          }
         }
       }
     };
@@ -3258,6 +3296,7 @@ class SkillStore {
     const target = nodePath.resolve(root, rel);
     const prefix = root.endsWith(nodePath.sep) ? root : root + nodePath.sep;
     if (target !== root && !target.startsWith(prefix)) throw new Error('Skill 文件路径越界');
+    this.assertRealPathInside(root, target);
     const stat = fs.statSync(target);
     if (!stat.isFile()) throw new Error('不是文件：' + rel);
     if (stat.size > 100 * 1024) throw new Error('Skill 文件超过 100 KB');
@@ -3352,6 +3391,7 @@ class SkillStore {
     if (target === root || !target.startsWith(prefix)) {
       throw new Error('拒绝删除 Skill 根目录外的路径');
     }
+    this.assertRealPathInside(root, target);
     await this.trashPath(target);
     return skill;
   }
@@ -5055,7 +5095,7 @@ class ChatView extends ItemView {
                     await invokeMcp();
                   }
                 } else {
-                  out = await this.plugin.tools.run(fn, args);
+                  out = await this.plugin.tools.run(fn, args, this);
                   card.done(truncate(out, 400));
                 }
               } catch (err) {
@@ -5166,10 +5206,12 @@ class ChatView extends ItemView {
   }
 
   collectTools(model) {
-    if (model.tools === false) return [];
+    if (!model || model.tools === false) return [];
     const out = [];
     out.push(...this.builtinTools());
-    if (this.plugin.settings.enableTools) out.push(...this.plugin.mcp.tools());
+    if (!this.session.skillAuthoring && this.plugin.settings.enableTools) {
+      out.push(...this.plugin.mcp.tools());
+    }
     return out;
   }
 
@@ -6410,6 +6452,17 @@ class AIChatProSettingTab extends PluginSettingTab {
       );
     portSetting.settingEl.addClass('aip-bridge-port');
 
+    new Setting(box)
+      .setName('Agent 写回目录')
+      .setDesc('bridge_write_result 只能写入这个 Vault 目录，不能指定任意路径')
+      .addText((text) =>
+        text.setValue(s.bridge.writeRoot || 'MarginMuse Agent Output').onChange(async (value) => {
+          s.bridge.writeRoot = normToolPath(value || 'MarginMuse Agent Output');
+          await this.plugin.saveSettings();
+          this.display();
+        })
+      );
+
     const endpoint = this.plugin.bridge.url() || 'http://127.0.0.1:' + (s.bridge.port || 32145) + '/mcp';
     const status = this.plugin.bridge.server
       ? '运行中'
@@ -6798,6 +6851,10 @@ class AIChatProPlugin extends Plugin {
   }
 
   activeChatView() {
+    const recent = this.app.workspace.getMostRecentLeaf
+      ? this.app.workspace.getMostRecentLeaf()
+      : null;
+    if (recent && recent.view instanceof ChatView) return recent.view;
     const views = this.app.workspace
       .getLeavesOfType(VIEW_TYPE)
       .map((leaf) => leaf.view)
@@ -6832,6 +6889,7 @@ class AIChatProPlugin extends Plugin {
     const model = view.currentModel();
     if (!model || model.tools === false) {
       new Notice('AI 直接创建 Skill 需要选择一个支持工具调用的模型');
+      return;
     }
     await view.newChat();
     view.session.skillAuthoring = true;
@@ -6892,6 +6950,13 @@ class AIChatProPlugin extends Plugin {
     );
     this.settings.bridge.enabled = this.settings.bridge.enabled === true;
     this.settings.bridge.token = String(this.settings.bridge.token || '');
+    try {
+      this.settings.bridge.writeRoot = normToolPath(
+        this.settings.bridge.writeRoot || 'MarginMuse Agent Output'
+      );
+    } catch (e) {
+      this.settings.bridge.writeRoot = 'MarginMuse Agent Output';
+    }
   }
 
   async saveSettings() {

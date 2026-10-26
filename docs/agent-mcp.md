@@ -98,4 +98,4 @@ POST http://127.0.0.1:32145/mcp
 Authorization: Bearer <generated token>
 ```
 
-It exposes `bridge_session_context`, `bridge_active_note`, `bridge_search_vault`, `bridge_read_note`, and `bridge_write_result`. The write tool asks the user for confirmation in the MarginMuse UI and never exposes hidden configuration or API keys.
+It exposes `bridge_session_context`, `bridge_active_note`, `bridge_search_vault`, `bridge_read_note`, and `bridge_write_result`. The write tool is confined to the configured Agent output folder, shows a content preview and SHA-256 prefix, asks the user for confirmation, and never exposes hidden configuration or API keys.
