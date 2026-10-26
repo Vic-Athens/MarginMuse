@@ -23,7 +23,7 @@ const nodePath = require('path');
 const os = require('os');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.6.3';
+const VERSION = '2.6.4';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -2978,9 +2978,9 @@ class SkillStore {
     if (!displayName) throw new Error('Skill 名称不能为空');
     const root = this.resolveRoot();
     let slug = displayName
-      .normalize('NFKD')
+      .normalize('NFKC')
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
       .replace(/^-+|-+$/g, '');
     if (!slug) slug = 'skill-' + Date.now().toString(36);
     return { name: displayName, root, dir: nodePath.join(root, slug), path: nodePath.join(root, slug, 'SKILL.md') };
@@ -4770,18 +4770,10 @@ class ChatView extends ItemView {
   builtinTools() {
     const s = this.plugin.settings;
     const out = [];
-    const skillAuthoringBlocked = new Set([
-      'write_file',
-      'create_folder',
-      'create_note',
-      'append_note',
-      'edit_note',
-      'delete_file',
-      'rename_file',
-      'create_canvas',
-      'edit_canvas',
-      'run_command',
-    ]);
+    if (this.session.skillAuthoring) {
+      const writer = BUILTIN_TOOLS.find((t) => t.function.name === 'write_skill');
+      return writer ? [writer] : [];
+    }
     out.push(
       ...BUILTIN_TOOLS.filter(
         (t) =>
@@ -4792,21 +4784,16 @@ class ChatView extends ItemView {
             'activate_skill',
             'list_skill_files',
             'read_skill_file',
-          ].includes(t.function.name) &&
-          !(this.session.skillAuthoring && skillAuthoringBlocked.has(t.function.name))
+          ].includes(t.function.name)
       )
     );
-    if (this.session.skillAuthoring) {
-      const writer = BUILTIN_TOOLS.find((t) => t.function.name === 'write_skill');
-      if (writer) out.push(writer);
-    }
     if (this.session.skillPath) {
       for (const name of ['list_skill_files', 'read_skill_file']) {
         const tool = BUILTIN_TOOLS.find((t) => t.function.name === name);
         if (tool) out.push(tool);
       }
     }
-    if (!this.session.skillPath && !this.session.skillAuthoring) {
+    if (!this.session.skillPath) {
       try {
         if (this.plugin.skills.list().length) {
           const activator = BUILTIN_TOOLS.find((t) => t.function.name === 'activate_skill');
@@ -4919,6 +4906,7 @@ class ChatView extends ItemView {
         '要求：\n' +
         '- 不要使用默认模板，不要擅自创建 scripts。\n' +
         '- 只能使用 write_skill 保存 Skill；不要调用 write_file、create_note 或在 Vault 根目录创建 skills/。\n' +
+        '- write_skill 成功返回后即表示保存完成。不要再用 list_dir、read_file 等普通工具验证隐藏路径，也不要把后续读取失败误报为保存失败。\n' +
         '- SKILL.md 说明何时使用、执行步骤、输入输出和必要约束。\n' +
         '- 内容保持精简，只写完成该工作流真正需要的信息。\n' +
         '- 保存后不要自动激活 Skill；让用户检查后再选择。';
