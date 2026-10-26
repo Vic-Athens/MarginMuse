@@ -21,9 +21,10 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const nodePath = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.6.7';
+const VERSION = '2.7.0';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -290,6 +291,11 @@ const DEFAULT_SETTINGS = {
     chunkCount: 0,
   },
   mcp: { servers: [] },
+  bridge: {
+    enabled: false,
+    port: 32145,
+    token: '',
+  },
   skillRoot: '.obsidian/marginmuse/skills',
   sessions: [],
   activeSessionId: '',
@@ -1547,6 +1553,298 @@ class McpManager {
     this.clients.forEach((c) => c.close());
     this.clients.clear();
     this.toolIndex.clear();
+  }
+}
+
+class BridgeServer {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.server = null;
+    this.port = 0;
+    this.error = '';
+  }
+
+  ensureToken() {
+    const bridge = this.plugin.settings.bridge;
+    if (!bridge.token) bridge.token = crypto.randomBytes(24).toString('hex');
+    return bridge.token;
+  }
+
+  url() {
+    return this.port ? 'http://127.0.0.1:' + this.port + '/mcp' : '';
+  }
+
+  tools() {
+    return [
+      {
+        name: 'bridge_session_context',
+        description: 'Read recent text messages from the currently active MarginMuse session.',
+        inputSchema: {
+          type: 'object',
+          properties: { limit: { type: 'number', description: 'Number of recent messages, 1-30.' } },
+        },
+      },
+      {
+        name: 'bridge_active_note',
+        description: 'Get the path of the active Markdown note and optionally its text.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            include_content: { type: 'boolean' },
+            max_chars: { type: 'number' },
+          },
+        },
+      },
+      {
+        name: 'bridge_search_vault',
+        description: 'Search Markdown notes in the active vault.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            limit: { type: 'number' },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'bridge_read_note',
+        description: 'Read a Markdown vault file using the same protected-path rules as built-in tools.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string' },
+            max_chars: { type: 'number' },
+          },
+          required: ['path'],
+        },
+      },
+      {
+        name: 'bridge_write_result',
+        description: 'Propose a note write or append. The user must approve it in MarginMuse.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string' },
+            content: { type: 'string' },
+            append: { type: 'boolean' },
+          },
+          required: ['path', 'content'],
+        },
+      },
+    ];
+  }
+
+  async getSessionContext(args) {
+    const view = this.plugin.activeChatView();
+    if (!view) return 'No active MarginMuse chat view.';
+    const session = view.session;
+    const limit = Math.max(1, Math.min(30, Number(args.limit) || 10));
+    const messages = (session.messages || [])
+      .filter((message) => message.role === 'user' || message.role === 'assistant')
+      .slice(-limit)
+      .map((message) => ({
+        role: message.role,
+        time: message.time || '',
+        text: truncate(contentToText(message.content), 6000),
+      }));
+    return JSON.stringify(
+      {
+        sessionId: session.id,
+        title: session.title,
+        skill: session.skillPath ? nodePath.basename(nodePath.dirname(session.skillPath)) : '',
+        messages,
+      },
+      null,
+      2
+    );
+  }
+
+  async getActiveNote(args) {
+    const file = this.plugin.app.workspace.getActiveFile();
+    if (!(file instanceof TFile)) return 'No active file.';
+    const out = { path: file.path, name: file.basename, extension: file.extension };
+    if (args.include_content === true && file.extension === 'md') {
+      const max = Math.max(500, Math.min(20000, Number(args.max_chars) || 6000));
+      out.content = truncate(await this.plugin.app.vault.cachedRead(file), max);
+    }
+    return JSON.stringify(out, null, 2);
+  }
+
+  async writeResult(args) {
+    let path = normToolPath(args.path);
+    if (!/\.md$/i.test(path)) path += '.md';
+    const content = String(args.content || '');
+    if (!content.trim()) throw new Error('写回内容不能为空');
+    if (content.length > 200000) throw new Error('写回内容超过 200000 字');
+    const append = args.append === true;
+    const existing = this.plugin.app.vault.getAbstractFileByPath(path);
+    const ok = await this.plugin.tools.confirmCard(
+      '本地 Agent 写回笔记？',
+      path + '\n\n方式：' + (append ? '追加' : '覆盖/创建') + '\n内容长度：' + content.length
+    );
+    if (!ok) return 'User rejected the write.';
+    if (existing) {
+      if (!(existing instanceof TFile)) throw new Error('目标路径是文件夹');
+      if (append) {
+        const old = await this.plugin.app.vault.cachedRead(existing);
+        await this.plugin.app.vault.modify(existing, old.replace(/\n*$/, '\n\n') + content);
+      } else {
+        await this.plugin.app.vault.modify(existing, content);
+      }
+    } else {
+      await this.plugin.tools.ensureFolder(path);
+      await this.plugin.app.vault.create(path, content);
+    }
+    return JSON.stringify({ ok: true, path, append });
+  }
+
+  async callTool(name, args) {
+    if (name === 'bridge_session_context') return this.getSessionContext(args || {});
+    if (name === 'bridge_active_note') return this.getActiveNote(args || {});
+    if (name === 'bridge_search_vault') {
+      return this.plugin.tools.searchVault({
+        query: String(args.query || ''),
+        limit: args.limit,
+      });
+    }
+    if (name === 'bridge_read_note') {
+      const result = await this.plugin.tools.readNote({ path: args.path });
+      const max = Math.max(500, Math.min(20000, Number(args.max_chars) || 12000));
+      return truncate(result, max);
+    }
+    if (name === 'bridge_write_result') return this.writeResult(args || {});
+    throw new Error('Unknown bridge tool: ' + name);
+  }
+
+  authorized(req) {
+    const token = this.ensureToken();
+    const header = String(req.headers.authorization || '');
+    const provided = header.replace(/^Bearer\s+/i, '').trim();
+    if (!provided || provided.length !== token.length) return false;
+    try {
+      return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(token));
+    } catch (e) {
+      return false;
+    }
+  }
+
+  sendJson(res, status, value) {
+    const data = JSON.stringify(value);
+    res.writeHead(status, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Length': Buffer.byteLength(data),
+      'Cache-Control': 'no-store',
+    });
+    res.end(data);
+  }
+
+  sendRpcError(res, id, code, message) {
+    this.sendJson(res, 200, {
+      jsonrpc: '2.0',
+      id: id == null ? null : id,
+      error: { code, message: String(message || 'Bridge error') },
+    });
+  }
+
+  handleHttp(req, res) {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, { Allow: 'POST, OPTIONS' });
+      res.end();
+      return;
+    }
+    if (req.method !== 'POST' || req.url.split('?')[0] !== '/mcp') {
+      this.sendJson(res, 404, { error: 'Not found' });
+      return;
+    }
+    if (!this.authorized(req)) {
+      this.sendJson(res, 401, { error: 'Unauthorized' });
+      return;
+    }
+    let raw = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      raw += chunk;
+      if (raw.length > 1024 * 1024) req.destroy(new Error('Request too large'));
+    });
+    req.on('error', (e) => {
+      if (!res.headersSent) this.sendJson(res, 400, { error: e.message });
+    });
+    req.on('end', async () => {
+      let msg;
+      try {
+        msg = JSON.parse(raw);
+      } catch (e) {
+        this.sendJson(res, 400, { error: 'Invalid JSON' });
+        return;
+      }
+      if (!msg || msg.jsonrpc !== '2.0' || !msg.method) {
+        this.sendJson(res, 400, { error: 'Invalid JSON-RPC request' });
+        return;
+      }
+      if (msg.id == null) {
+        res.writeHead(202);
+        res.end();
+        return;
+      }
+      try {
+        let result;
+        if (msg.method === 'initialize') {
+          result = {
+            protocolVersion: (msg.params && msg.params.protocolVersion) || MCP_PROTOCOL,
+            capabilities: { tools: {} },
+            serverInfo: { name: 'marginmuse-bridge', version: VERSION },
+          };
+          res.setHeader('mcp-session-id', crypto.randomBytes(12).toString('hex'));
+        } else if (msg.method === 'ping') {
+          result = {};
+        } else if (msg.method === 'tools/list') {
+          result = { tools: this.tools() };
+        } else if (msg.method === 'tools/call') {
+          const params = msg.params || {};
+          const text = await this.callTool(params.name, params.arguments || {});
+          result = { content: [{ type: 'text', text: String(text) }] };
+        } else {
+          this.sendRpcError(res, msg.id, -32601, 'Method not found');
+          return;
+        }
+        this.sendJson(res, 200, { jsonrpc: '2.0', id: msg.id, result });
+      } catch (e) {
+        this.sendRpcError(res, msg.id, -32000, e && e.message ? e.message : e);
+      }
+    });
+  }
+
+  async start() {
+    if (this.server) return this.url();
+    const bridge = this.plugin.settings.bridge;
+    this.ensureToken();
+    const port = Math.max(1024, Math.min(65535, Number(bridge.port) || 32145));
+    await new Promise((resolve, reject) => {
+      const server = http.createServer((req, res) => this.handleHttp(req, res));
+      server.once('error', (e) => {
+        this.error = e.message;
+        this.server = null;
+        reject(e);
+      });
+      server.listen(port, '127.0.0.1', () => {
+        this.server = server;
+        this.port = server.address().port;
+        this.error = '';
+        resolve();
+      });
+    });
+    await this.plugin.saveSettings();
+    return this.url();
+  }
+
+  async stop() {
+    if (!this.server) return;
+    const server = this.server;
+    this.server = null;
+    this.port = 0;
+    if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+    await new Promise((resolve) => server.close(() => resolve()));
   }
 }
 
@@ -5245,6 +5543,7 @@ const SETTING_TABS = [
   { id: 'rag', label: '检索' },
   { id: 'web', label: '联网' },
   { id: 'mcp', label: 'MCP' },
+  { id: 'bridge', label: 'Bridge' },
   { id: 'skills', label: 'Skills' },
   { id: 'about', label: '关于' },
 ];
@@ -5284,6 +5583,7 @@ class AIChatProSettingTab extends PluginSettingTab {
     else if (this.tab === 'rag') this.renderRag(body, s);
     else if (this.tab === 'web') this.renderWeb(body, s);
     else if (this.tab === 'mcp') this.renderMcp(body, s);
+    else if (this.tab === 'bridge') this.renderBridge(body, s);
     else if (this.tab === 'skills') this.renderSkills(body, s);
     else this.renderAbout(body, s);
   }
@@ -6062,6 +6362,110 @@ class AIChatProSettingTab extends PluginSettingTab {
     }
   }
 
+  /* ---------------- MCP Bridge ---------------- */
+
+  renderBridge(parent, s) {
+    if (!s.bridge) s.bridge = { enabled: false, port: 32145, token: '' };
+    const box = this.section(
+      parent,
+      'MarginMuse Bridge',
+      '让本地 Agent 反向读取当前会话、活动笔记和 Vault 搜索结果。Bridge 默认关闭，只监听本机回环地址，并要求 Bearer Token。'
+    );
+
+    new Setting(box)
+      .setName('启用 Bridge MCP Server')
+      .setDesc('仅监听 127.0.0.1；不会暴露 API Key、data.json 或 .obsidian 配置')
+      .addToggle((toggle) =>
+        toggle.setValue(s.bridge.enabled === true).onChange(async (value) => {
+          s.bridge.enabled = value;
+          await this.plugin.saveSettings();
+          try {
+            if (value) await this.plugin.bridge.start();
+            else await this.plugin.bridge.stop();
+          } catch (e) {
+            new Notice('Bridge 启动失败：' + (e && e.message ? e.message : e));
+          }
+          this.display();
+        })
+      );
+
+    const portSetting = new Setting(box)
+      .setName('端口')
+      .setDesc('修改端口后，如果 Bridge 已启用会自动重启')
+      .addText((text) =>
+        text.setValue(String(s.bridge.port || 32145)).onChange(async (value) => {
+          const port = Math.max(1024, Math.min(65535, parseInt(value, 10) || 32145));
+          s.bridge.port = port;
+          await this.plugin.saveSettings();
+          if (s.bridge.enabled) {
+            await this.plugin.bridge.stop();
+            try {
+              await this.plugin.bridge.start();
+            } catch (e) {
+              new Notice('Bridge 重启失败：' + (e && e.message ? e.message : e));
+            }
+          }
+          this.display();
+        })
+      );
+    portSetting.settingEl.addClass('aip-bridge-port');
+
+    const endpoint = this.plugin.bridge.url() || 'http://127.0.0.1:' + (s.bridge.port || 32145) + '/mcp';
+    const status = this.plugin.bridge.server
+      ? '运行中'
+      : s.bridge.enabled
+        ? '已启用但未运行' + (this.plugin.bridge.error ? '：' + this.plugin.bridge.error : '')
+        : '已停止';
+    const info = this.card(box);
+    info.createDiv({ cls: 'aip-set-card-head' }).createSpan({
+      cls: 'aip-set-card-title',
+      text: '状态：' + status,
+    });
+    const endpointRow = info.createDiv({ cls: 'aip-set-row' });
+    const endpointInput = endpointRow.createEl('input', {
+      cls: 'aip-set-input',
+      attr: { readonly: 'true' },
+    });
+    endpointInput.value = endpoint;
+    endpointInput.style.flex = '1';
+    const copyEndpoint = endpointRow.createEl('button', { text: '复制地址' });
+    copyEndpoint.onclick = async () => {
+      await navigator.clipboard.writeText(endpoint);
+      new Notice('Bridge 地址已复制');
+    };
+
+    const tokenRow = info.createDiv({ cls: 'aip-set-row' });
+    const tokenInput = tokenRow.createEl('input', {
+      cls: 'aip-set-input',
+      attr: { readonly: 'true', type: 'password' },
+    });
+    tokenInput.value = this.plugin.bridge.ensureToken();
+    tokenInput.style.flex = '1';
+    const copyToken = tokenRow.createEl('button', { text: '复制 Token' });
+    copyToken.onclick = async () => {
+      await this.plugin.saveSettings();
+      await navigator.clipboard.writeText(tokenInput.value);
+      new Notice('Bridge Token 已复制');
+    };
+    const newToken = tokenRow.createEl('button', { text: '重新生成' });
+    newToken.onclick = async () => {
+      s.bridge.token = crypto.randomBytes(24).toString('hex');
+      await this.plugin.saveSettings();
+      tokenInput.value = s.bridge.token;
+      new Notice('Bridge Token 已更新；已连接的 Agent 需要改用新 Token');
+    };
+
+    const tools = this.card(box);
+    tools.createDiv({ cls: 'aip-set-card-title', text: '可反向调用的工具' });
+    for (const tool of this.plugin.bridge.tools()) {
+      tools.createDiv({ cls: 'aip-set-desc', text: '· ' + tool.name + '：' + tool.description });
+    }
+    tools.createDiv({
+      cls: 'aip-set-desc',
+      text: 'bridge_write_result 会先在 MarginMuse 中弹出确认，用户拒绝时不会修改文件。',
+    });
+  }
+
   /* ---------------- Skills ---------------- */
 
   renderSkills(parent, s) {
@@ -6201,8 +6605,16 @@ class AIChatProPlugin extends Plugin {
     this.tools = new VaultTools(this);
     this.index = new VaultIndex(this);
     this.mcp = new McpManager(this);
+    this.bridge = new BridgeServer(this);
     this.skills = new SkillStore(this);
     if (this._removedLegacyTemplates || this._migratedSkillRoot) await this.saveSettings();
+    if (this.settings.bridge.enabled) {
+      try {
+        await this.bridge.start();
+      } catch (e) {
+        console.warn('[MarginMuse] Bridge 启动失败', e);
+      }
+    }
 
     this.registerView(VIEW_TYPE, (leaf) => new ChatView(leaf, this));
 
@@ -6302,6 +6714,11 @@ class AIChatProPlugin extends Plugin {
 
   onunload() {
     this._unloading = true;
+    try {
+      this.bridge.stop();
+    } catch (e) {
+      /* ignore */
+    }
     this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach((leaf) => {
       const view = leaf.view;
       if (!(view instanceof ChatView)) return;
@@ -6464,6 +6881,17 @@ class AIChatProPlugin extends Plugin {
     if (!this.settings.rag) this.settings.rag = Object.assign({}, DEFAULT_SETTINGS.rag);
     if (!this.settings.mcp) this.settings.mcp = { servers: [] };
     if (!Array.isArray(this.settings.mcp.servers)) this.settings.mcp.servers = [];
+    if (!this.settings.bridge || typeof this.settings.bridge !== 'object') {
+      this.settings.bridge = Object.assign({}, DEFAULT_SETTINGS.bridge);
+    } else {
+      this.settings.bridge = Object.assign({}, DEFAULT_SETTINGS.bridge, this.settings.bridge);
+    }
+    this.settings.bridge.port = Math.max(
+      1024,
+      Math.min(65535, Number(this.settings.bridge.port) || DEFAULT_SETTINGS.bridge.port)
+    );
+    this.settings.bridge.enabled = this.settings.bridge.enabled === true;
+    this.settings.bridge.token = String(this.settings.bridge.token || '');
   }
 
   async saveSettings() {

@@ -89,4 +89,13 @@ A bidirectional setup should use two MCP roles rather than assuming every MCP co
 1. MarginMuse as MCP client to the Agent's task server.
 2. MarginMuse Bridge as MCP server for contextual read and approved write-back tools.
 
-The reverse bridge is a future opt-in extension and is not part of the current Skill implementation.
+## MarginMuse Bridge
+
+MarginMuse now includes an opt-in reverse MCP Bridge, disabled by default:
+
+```text
+POST http://127.0.0.1:32145/mcp
+Authorization: Bearer <generated token>
+```
+
+It exposes `bridge_session_context`, `bridge_active_note`, `bridge_search_vault`, `bridge_read_note`, and `bridge_write_result`. The write tool asks the user for confirmation in the MarginMuse UI and never exposes hidden configuration or API keys.

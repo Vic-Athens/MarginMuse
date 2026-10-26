@@ -18,6 +18,7 @@
 - MCP support over local `stdio` or streamable HTTP.
 - An optional local Agent MCP connection with long-running task timeouts and call confirmation.
 - MCP progress updates, cancellation, recent task IDs, and continuation context.
+- Optional local MCP Bridge so a trusted Agent can request MarginMuse context and approved note writes.
 - Built-in tools for models that support tool calling, with independent web and MCP toggles and per-session context tracking.
 
 ## Requirements
@@ -65,6 +66,7 @@ MarginMuse has no telemetry and does not include ads.
 - `web_fetch` requests the URL supplied by the user or requested through the model.
 - Optional MCP servers may start local processes and may access resources according to their own configuration.
 - A local Agent MCP server may receive the task text and selected context needed to complete a delegated task.
+- The optional MarginMuse Bridge listens only on `127.0.0.1`, requires a Bearer Token, and can request approved note writes.
 - A Skill directory can point to a vault folder or an absolute local path chosen by the user.
 - Copying an assistant reply writes its text to the system clipboard.
 - API keys and settings are stored locally in the plugin's `data.json`.
@@ -88,6 +90,20 @@ Local Agent presets are disabled by default. When a server is marked as a comple
 Agent cards display MCP progress notifications when the server provides them. Stopping a response also cancels active MCP requests. Returned `threadId` and `taskId` values are retained in the session so the main model can continue an Agent task later.
 
 See [Local Agent MCP contract](docs/agent-mcp.md) for the recommended adapter tools and response fields.
+
+## MCP Bridge
+
+The third-stage **Bridge** is a reverse MCP server hosted by MarginMuse. It is disabled by default, binds only to `127.0.0.1`, and requires the generated Bearer Token.
+
+Trusted local Agents can call:
+
+- `bridge_session_context`: recent messages in the active MarginMuse session.
+- `bridge_active_note`: active note metadata and optional text.
+- `bridge_search_vault`: search Markdown notes.
+- `bridge_read_note`: read a permitted vault note.
+- `bridge_write_result`: request an append or write, which always requires user confirmation in MarginMuse.
+
+The Bridge does not expose API keys, `data.json`, plugin configuration, or hidden-directory traversal.
 
 ## Skills
 
@@ -127,6 +143,7 @@ MarginMuse（页语）是一款面向 Obsidian 的双语 AI 写作与笔记助�
 - 本地复杂任务 Agent 默认停用，每次调用前会要求确认。
 - Skill 可以由用户自行创建，插件不内置默认 Skill，也不会自动执行 Skill scripts。
 - 默认会根据 Skill 名称和描述自动匹配任务；在输入框键入 `/skill` 可以临时指定一个 Skill，只对当前这一轮生效。
+- Bridge 默认关闭，只监听本机 `127.0.0.1` 并要求 Token；本地 Agent 写回笔记前必须由用户在 MarginMuse 中确认。
 - 在 Skills 设置里点击「让 AI 创建 Skill」，填写需求后由 AI 生成并保存 SKILL.md，不需要手动创建文件。
 - API Key 保存在本地插件目录的 `data.json` 中。
 
