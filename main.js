@@ -24,7 +24,7 @@ const os = require('os');
 const crypto = require('crypto');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '3.0.2';
+const VERSION = '3.0.3';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -3950,12 +3950,11 @@ class HistoryModal extends Modal {
       const rename = row.createEl('button', { cls: 'aip-mini-btn', text: '重命名' });
       rename.onclick = (e) => {
         e.stopPropagation();
-        const t = window.prompt('会话名称', s.title || '');
-        if (t != null && t.trim()) {
-          this.store.rename(s.id, t.trim());
-          this.store.plugin.saveSettings();
+        new SessionRenameModal(this.app, s.title || '', async (title) => {
+          this.store.rename(s.id, title);
+          await this.store.plugin.saveSettings();
           this.close();
-        }
+        }).open();
       };
       const del = row.createEl('button', { cls: 'aip-mini-btn is-danger', text: '删除' });
       del.onclick = (e) => {
@@ -3966,6 +3965,64 @@ class HistoryModal extends Modal {
         this.close();
       };
     }
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+class SessionRenameModal extends Modal {
+  constructor(app, currentTitle, onSave) {
+    super(app);
+    this.currentTitle = currentTitle;
+    this.onSave = onSave;
+  }
+
+  onOpen() {
+    this.modalEl.addClass('aip-session-rename-modal');
+    this.titleEl.setText('重命名会话');
+    const form = this.contentEl.createDiv({ cls: 'aip-agent-form' });
+    const field = form.createDiv({ cls: 'aip-agent-field' });
+    field.createEl('label', { text: '会话名称' });
+    const input = field.createEl('input', {
+      cls: 'aip-set-input',
+      attr: { placeholder: '输入会话名称' },
+    });
+    input.value = this.currentTitle;
+    const error = form.createDiv({ cls: 'aip-agent-error' });
+    const row = form.createDiv({ cls: 'aip-agent-create-actions' });
+    const cancel = row.createEl('button', { text: '取消' });
+    const save = row.createEl('button', { cls: 'mod-cta', text: '保存' });
+    const submit = async () => {
+      const title = input.value.trim();
+      if (!title) {
+        error.setText('会话名称不能为空');
+        input.focus();
+        return;
+      }
+      save.disabled = true;
+      try {
+        await this.onSave(title);
+        this.close();
+      } catch (e) {
+        save.disabled = false;
+        error.setText('保存失败：' + (e && e.message ? e.message : e));
+      }
+    };
+    cancel.onclick = () => this.close();
+    save.onclick = submit;
+    input.addEventListener('input', () => error.setText(''));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
+        submit();
+      }
+    });
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 50);
   }
 
   onClose() {

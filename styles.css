@@ -1322,6 +1322,10 @@
   width: min(560px, calc(100vw - 40px));
 }
 
+.aip-session-rename-modal {
+  width: min(420px, calc(100vw - 40px));
+}
+
 .aip-agent-form {
   display: flex;
   flex-direction: column;
