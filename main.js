@@ -23,7 +23,7 @@ const nodePath = require('path');
 const os = require('os');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.5.1';
+const VERSION = '2.5.2';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -3224,10 +3224,10 @@ class ChatView extends ItemView {
   refreshToolsBadge() {
     if (!this.toolsBtn) return;
     const s = this.plugin.settings;
-    const mcpCount = this.plugin.mcp.tools().length;
+    const mcpCount = s.enableTools ? this.plugin.mcp.tools().length : 0;
     this.toolsBtn.setText(mcpCount ? '工具 (' + mcpCount + ')' : '工具');
-    const anyTools = s.enableTools || s.enableWebTools !== false;
-    this.toolsBtn.toggleClass('is-on', !!anyTools);
+    this.toolsBtn.toggleClass('is-on', !!s.enableTools);
+    this.toolsBtn.setAttribute('title', s.enableTools ? 'MCP 工具已启用' : 'MCP 工具已关闭');
   }
 
   resetCtxBar() {
@@ -3403,15 +3403,16 @@ class ChatView extends ItemView {
     pop.createDiv({ cls: 'aip-pop-title', text: '联网搜索' });
 
     const on = s.enableWebTools !== false;
-    const swRow = pop.createDiv({ cls: 'aip-pop-item aip-pop-switch' });
+    const swRow = pop.createDiv({ cls: 'aip-pop-item aip-pop-switch' + (on ? ' is-active' : '') });
+    const sw = swRow.createSpan({ cls: 'aip-pop-check', text: on ? '✓' : '' });
     swRow.createSpan({ cls: 'aip-pop-name', text: '启用联网' });
-    const sw = swRow.createSpan({ cls: 'aip-switch' + (on ? ' is-on' : '') });
     swRow.onclick = async () => {
       s.enableWebTools = s.enableWebTools === false;
       await this.plugin.saveSettings();
-      sw.toggleClass('is-on', s.enableWebTools !== false);
+      const enabled = s.enableWebTools !== false;
+      sw.setText(enabled ? '✓' : '');
+      swRow.toggleClass('is-active', enabled);
       this.refreshWebBadge();
-      this.refreshToolsBadge();
       this.plugin.refreshViews();
     };
 
@@ -3450,8 +3451,8 @@ class ChatView extends ItemView {
   refreshWebBadge() {
     if (!this.webBtn) return;
     const s = this.plugin.settings;
-    const on = s.enableWebTools !== false && s.enableTools;
-    this.webBtn.setText(on ? '联网' : '联网关');
+    const on = s.enableWebTools !== false;
+    this.webBtn.setText('联网');
     this.webBtn.toggleClass('is-on', on);
     const names = (s.webEngines || ['bing']).map((k) => (SEARCH_ENGINES[k] || {}).name).filter(Boolean);
     this.webBtn.setAttribute('title', '联网搜索：' + (names.join(' + ') || 'Bing') + '（点击开关与选源）');
@@ -3462,30 +3463,41 @@ class ChatView extends ItemView {
     const s = this.plugin.settings;
     menu.addItem((i) =>
       i
-        .setTitle('启用工具调用')
+        .setTitle('启用 MCP 工具')
         .setChecked(!!s.enableTools)
         .onClick(async () => {
           s.enableTools = !s.enableTools;
           await this.plugin.saveSettings();
-          this.refreshToolsBadge();
+          try {
+            if (s.enableTools) {
+              new Notice('正在连接 MCP 工具…');
+              const result = await this.plugin.mcp.refresh();
+              if (result.failed.length) {
+                new Notice('部分 MCP 连接失败：' + result.failed.map((x) => x.name).join('、'));
+              }
+            } else {
+              this.plugin.mcp.closeAll();
+            }
+          } catch (e) {
+            new Notice('更新 MCP 状态失败：' + (e && e.message ? e.message : e));
+          }
+          this.plugin.refreshViews();
         })
     );
     menu.addSeparator();
-    const builtin = this.builtinTools();
-    menu.addItem((i) => i.setTitle('内置工具：共 ' + builtin.length + ' 个').setDisabled(true));
-    for (const t of builtin) menu.addItem((i) => i.setTitle('· ' + t.function.name).setDisabled(true));
     const mcpTools = this.plugin.mcp.tools();
-    if (mcpTools.length) {
+    if (!s.enableTools) {
+      menu.addItem((i) => i.setTitle('MCP 已关闭').setDisabled(true));
+    } else if (mcpTools.length) {
       for (const t of mcpTools) menu.addItem((i) => i.setTitle('· ' + t.function.name).setDisabled(true));
     } else {
-      menu.addItem((i) => i.setTitle('MCP：未连接任何服务器').setDisabled(true));
+      menu.addItem((i) => i.setTitle('MCP：没有可用工具').setDisabled(true));
     }
     menu.addSeparator();
     menu.addItem((i) =>
       i
         .setTitle('管理 MCP…')
         .setIcon('plug')
-        .setDisabled(!this.plugin.settings.enableTools && false)
         .onClick(() => this.plugin.openSettings('mcp'))
     );
     menu.showAtMouseEvent(ev);
@@ -4472,29 +4484,26 @@ class ChatView extends ItemView {
     return req.filter((k) => args[k] === undefined || args[k] === null || args[k] === '');
   }
 
-  /** 内置工具（受「启用工具」「联网工具」两个开关控制） */
+  /** 内置工具始终可用；MCP 和联网分别控制。 */
   builtinTools() {
     const s = this.plugin.settings;
     const out = [];
-    // 文件/笔记/白板操作类工具，受 enableTools 控制
-    if (s.enableTools) {
-      out.push(
-        ...BUILTIN_TOOLS.filter(
-          (t) =>
-            !['web_search', 'web_fetch', 'write_skill', 'list_skill_files', 'read_skill_file'].includes(
-              t.function.name
-            )
-        )
-      );
-      if (this.session.skillAuthoring) {
-        const writer = BUILTIN_TOOLS.find((t) => t.function.name === 'write_skill');
-        if (writer) out.push(writer);
-      }
-      if (this.session.skillPath) {
-        for (const name of ['list_skill_files', 'read_skill_file']) {
-          const tool = BUILTIN_TOOLS.find((t) => t.function.name === name);
-          if (tool) out.push(tool);
-        }
+    out.push(
+      ...BUILTIN_TOOLS.filter(
+        (t) =>
+          !['web_search', 'web_fetch', 'write_skill', 'list_skill_files', 'read_skill_file'].includes(
+            t.function.name
+          )
+      )
+    );
+    if (this.session.skillAuthoring) {
+      const writer = BUILTIN_TOOLS.find((t) => t.function.name === 'write_skill');
+      if (writer) out.push(writer);
+    }
+    if (this.session.skillPath) {
+      for (const name of ['list_skill_files', 'read_skill_file']) {
+        const tool = BUILTIN_TOOLS.find((t) => t.function.name === name);
+        if (tool) out.push(tool);
       }
     }
     // 联网工具，受 enableWebTools 独立控制
@@ -4937,17 +4946,6 @@ class AIChatProSettingTab extends PluginSettingTab {
         t.setValue(!!s.includeCurrentFile).onChange(async (v) => {
           s.includeCurrentFile = v;
           await this.plugin.saveSettings();
-        })
-      );
-
-    new Setting(box)
-      .setName('启用工具')
-      .setDesc('允许 AI 调用内置笔记工具与 MCP 工具')
-      .addToggle((t) =>
-        t.setValue(!!s.enableTools).onChange(async (v) => {
-          s.enableTools = v;
-          await this.plugin.saveSettings();
-          this.plugin.refreshViews();
         })
       );
 
@@ -5516,8 +5514,21 @@ class AIChatProSettingTab extends PluginSettingTab {
     const box = this.section(
       parent,
       'MCP 服务器',
-      '支持 stdio（本地命令）与 streamable HTTP 两种传输。连接成功后，工具会出现在对话底部「工具」按钮和模型的可调用列表里。'
+      '支持 stdio（本地命令）与 streamable HTTP 两种传输。对话底部的「工具」按钮只控制 MCP；内置笔记、Canvas 和 Skill 工具始终可用。'
     );
+
+    new Setting(box)
+      .setName('启用 MCP 工具')
+      .setDesc('只控制外部 MCP 工具，不影响内置笔记、Canvas、Skill 或联网工具')
+      .addToggle((t) =>
+        t.setValue(!!s.enableTools).onChange(async (v) => {
+          s.enableTools = v;
+          await this.plugin.saveSettings();
+          if (v) await this.plugin.mcp.refresh();
+          else this.plugin.mcp.closeAll();
+          this.plugin.refreshViews();
+        })
+      );
 
     const add = this.card(box);
     const row = add.createDiv({ cls: 'aip-set-row' });
@@ -5837,6 +5848,7 @@ class AIChatProPlugin extends Plugin {
     // 后台连接 MCP（失败不打扰用户，失败后自动再试一次）
     const mcpStartupTimer = setTimeout(async () => {
       try {
+        if (!this.settings.enableTools) return;
         let r = await this.mcp.refresh();
         if (r.failed.length && !this._unloading) {
           await new Promise((s) => setTimeout(s, 1500));
@@ -5945,8 +5957,8 @@ class AIChatProPlugin extends Plugin {
       return;
     }
     const model = view.currentModel();
-    if (!this.settings.enableTools || !model || model.tools === false) {
-      new Notice('AI 直接创建 Skill 需要启用工具，并选择一个支持工具调用的模型');
+    if (!model || model.tools === false) {
+      new Notice('AI 直接创建 Skill 需要选择一个支持工具调用的模型');
     }
     await view.newChat();
     view.session.skillAuthoring = true;

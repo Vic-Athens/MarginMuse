@@ -17,7 +17,7 @@
 - User-authored Skills in standard `SKILL.md` format, with no bundled defaults.
 - MCP support over local `stdio` or streamable HTTP.
 - An optional local Agent MCP connection with long-running task timeouts and call confirmation.
-- Optional AI tool calling, web access, and per-session context tracking.
+- Built-in tools for models that support tool calling, with independent web and MCP toggles and per-session context tracking.
 
 ## Requirements
 
@@ -48,7 +48,7 @@ For manual installation:
 4. Open MarginMuse from the ribbon and start a conversation.
 5. Optionally create a Skill under **Settings → MarginMuse → Skills**, then activate it from the chat header.
 
-For use with restricted or untrusted notes, disable tool calling or review every requested file operation.
+For use with restricted or untrusted notes, choose a model with tool calling disabled or review every requested file operation.
 
 ## Network and privacy
 
@@ -75,6 +75,8 @@ Model output can still be incorrect. Review generated edits, Canvas changes, and
 ## MCP
 
 MarginMuse supports MCP servers over `stdio` and streamable HTTP. Only connect MCP servers you trust. A local MCP command runs with the permissions of the Obsidian process.
+
+The chat toolbar's **Tools** button controls MCP only. Built-in vault and Canvas tools remain available independently, and web access has its own toggle.
 
 Local Agent presets are disabled by default. When a server is marked as a complex-task Agent, MarginMuse asks for confirmation before each call. Configure the server timeout according to the expected task duration.
 
@@ -106,8 +108,9 @@ MarginMuse（页语）是一款面向 Obsidian 的双语 AI 写作与笔记助�
 
 - 对话内容和引用的笔记会发送给你配置的 AI 服务商。
 - 联网搜索会访问 Bing，必要时会后备到百度、搜狗或 360。
-- 启用 AI 工具后，模型可以读取和修改当前库中的文件。
+- 使用支持工具调用的模型时，可以读取和修改当前库中的文件。
 - 本地 MCP 服务会以 Obsidian 进程的权限运行，请只连接可信服务。
+- 对话底部的「工具」按钮只控制 MCP；内置笔记工具始终可用，联网使用独立开关。
 - 本地复杂任务 Agent 默认停用，每次调用前会要求确认。
 - Skill 可以由用户自行创建，插件不内置默认 Skill，也不会自动执行 Skill scripts。
 - 在 Skills 设置里点击「让 AI 创建 Skill」，填写需求后由 AI 生成并保存 SKILL.md，不需要手动创建文件。
