@@ -111,6 +111,8 @@ To create a Skill, open **Settings → MarginMuse → Skills** and select **Let 
 
 The `write_skill` tool is available only during Skill Builder conversations, never in ordinary chat sessions.
 
+Skill settings also provide a **Delete Skill** action. It asks for confirmation and sends the entire Skill folder to the operating system trash; if trash is unavailable, the plugin cancels the deletion instead of permanently removing files.
+
 ## 中文说明
 
 MarginMuse（页语）是一款面向 Obsidian 的双语 AI 写作与笔记助手，支持多会话、笔记上下文、文件工具、Canvas 白板、联网搜索和 MCP。

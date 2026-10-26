@@ -23,7 +23,7 @@ const nodePath = require('path');
 const os = require('os');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.6.4';
+const VERSION = '2.6.5';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -3008,6 +3008,32 @@ class SkillStore {
     fs.mkdirSync(target.dir, { recursive: true });
     fs.writeFileSync(target.path, body + '\n', 'utf8');
     return { ...this.parseSkill(body, target.path), exists: false };
+  }
+
+  async trashPath(path) {
+    let electronShell;
+    try {
+      electronShell = require('electron').shell;
+    } catch (e) {
+      throw new Error('当前环境无法访问系统回收站');
+    }
+    if (!electronShell || typeof electronShell.trashItem !== 'function') {
+      throw new Error('当前环境不支持系统回收站');
+    }
+    await electronShell.trashItem(path);
+  }
+
+  async delete(skillPath) {
+    const skill = this.load(skillPath);
+    const directory = nodePath.dirname(skill.path);
+    const root = nodePath.resolve(this.resolveRoot());
+    const target = nodePath.resolve(directory);
+    const prefix = root.endsWith(nodePath.sep) ? root : root + nodePath.sep;
+    if (target === root || !target.startsWith(prefix)) {
+      throw new Error('拒绝删除 Skill 根目录外的路径');
+    }
+    await this.trashPath(target);
+    return skill;
   }
 }
 
@@ -6093,6 +6119,23 @@ class AIChatProSettingTab extends PluginSettingTab {
           new Notice('Skill 路径已复制');
         }
       };
+      const del = actions.createEl('button', { cls: 'mod-warning', text: '删除 Skill' });
+      del.onclick = async () => {
+        const ok = await askConfirm(
+          this.app,
+          '删除 Skill？',
+          skill.name + '\n\n' + skill.path + '\n\n整个 Skill 文件夹会移到系统回收站。'
+        );
+        if (!ok) return;
+        try {
+          await this.plugin.skills.delete(skill.path);
+          await this.plugin.forgetSkill(skill.path);
+          new Notice('Skill 已移到系统回收站：' + skill.name);
+          this.display();
+        } catch (e) {
+          new Notice('删除 Skill 失败：' + (e && e.message ? e.message : e));
+        }
+      };
     }
   }
 
@@ -6312,6 +6355,20 @@ class AIChatProPlugin extends Plugin {
       .map((leaf) => leaf.view)
       .filter((view) => view instanceof ChatView);
     return views.find((view) => view.isStreaming) || views[0] || null;
+  }
+
+  async forgetSkill(skillPath) {
+    const target = nodePath.resolve(skillPath);
+    for (const session of this.settings.sessions || []) {
+      if (session.skillPath && nodePath.resolve(session.skillPath) === target) {
+        delete session.skillPath;
+        delete session.skillAuto;
+        delete session.skillExplicit;
+        delete session.skillPinned;
+      }
+    }
+    await this.saveSettings();
+    this.refreshViews();
   }
 
   async startSkillAuthoring() {
