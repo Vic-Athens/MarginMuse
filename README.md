@@ -14,7 +14,7 @@
 - File and folder deletion through the Obsidian trash.
 - Canvas creation and editing.
 - Web search with automatic source fallback and official Obsidian changelog support.
-- User-authored Skills in standard `SKILL.md` format, with automatic task matching, optional manual pinning, and no bundled defaults.
+- User-authored Skills in standard `SKILL.md` format, with automatic task matching, explicit `/skill` invocation, and no bundled defaults.
 - MCP support over local `stdio` or streamable HTTP.
 - An optional local Agent MCP connection with long-running task timeouts and call confirmation.
 - MCP progress updates, cancellation, recent task IDs, and continuation context.
@@ -103,7 +103,7 @@ MarginMuse loads user-authored Skills from the configured Skill root. The defaul
 
 For an active Skill, AI tools can list and read only files inside that Skill directory through the restricted `list_skill_files` and `read_skill_file` tools.
 
-By default, MarginMuse gives the model a lightweight Skill catalog and lets it call `activate_skill` when the task matches. Manually selecting a Skill from the chat header pins it for that session; selecting **Clear current Skill** returns to automatic matching.
+By default, MarginMuse gives the model a lightweight Skill catalog and lets it call `activate_skill` when the task matches. To choose a Skill explicitly, type `/skill` in the composer, select a Skill, and continue with the task. Explicit selection applies only to that turn; there is no permanent pin mode.
 
 To create a Skill, open **Settings → MarginMuse → Skills** and select **Let AI create a Skill**. MarginMuse starts a dedicated Skill Builder conversation with a prefilled request. Describe the desired workflow and the AI saves a complete `SKILL.md` through the restricted `write_skill` tool. The AI may ask follow-up questions before writing.
 
@@ -122,7 +122,7 @@ MarginMuse（页语）是一款面向 Obsidian 的双语 AI 写作与笔记助�
 - 对话底部的「工具」按钮只控制 MCP；内置笔记工具始终可用，联网使用独立开关。
 - 本地复杂任务 Agent 默认停用，每次调用前会要求确认。
 - Skill 可以由用户自行创建，插件不内置默认 Skill，也不会自动执行 Skill scripts。
-- 默认会根据 Skill 名称和描述自动匹配任务；从顶部菜单选择 Skill 会改为手动固定，清除后恢复自动匹配。
+- 默认会根据 Skill 名称和描述自动匹配任务；在输入框键入 `/skill` 可以临时指定一个 Skill，只对当前这一轮生效。
 - 在 Skills 设置里点击「让 AI 创建 Skill」，填写需求后由 AI 生成并保存 SKILL.md，不需要手动创建文件。
 - API Key 保存在本地插件目录的 `data.json` 中。
 

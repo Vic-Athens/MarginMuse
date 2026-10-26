@@ -23,7 +23,7 @@ const nodePath = require('path');
 const os = require('os');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.6.0';
+const VERSION = '2.6.1';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -2020,14 +2020,11 @@ class VaultTools {
   async activateSkill(args) {
     const view = this.plugin.activeChatView();
     if (!view) return '无法确定当前聊天会话';
-    if (view.session && view.session.skillPinned) {
-      return '当前会话已固定 Skill，不能自动切换';
-    }
     const skill = this.plugin.skills.find(args.name);
     if (!skill) return '没有找到匹配的 Skill：' + String(args.name || '');
     view.session.skillPath = skill.path;
     view.session.skillAuto = true;
-    delete view.session.skillPinned;
+    delete view.session.skillExplicit;
     view.session.updatedAt = Date.now();
     await this.plugin.saveSettings();
     view.updateSub();
@@ -3172,7 +3169,6 @@ class ChatView extends ItemView {
     const btns = titleRow.createDiv({ cls: 'aip-header-btns' });
     this.makeIconBtn(btns, 'plus', '新会话', () => this.newChat());
     this.makeIconBtn(btns, 'history', '会话历史', () => this.openHistory());
-    this.makeIconBtn(btns, 'sparkles', 'Skills', (ev) => this.openSkills(ev));
 
     /* 模式切换 */
     const tabs = header.createDiv({ cls: 'aip-tabs' });
@@ -3195,7 +3191,7 @@ class ChatView extends ItemView {
       cls: 'aip-input',
       attr: {
         rows: '1',
-        placeholder: '问点什么… / 选 Skill，@ 引用笔记，可直接粘贴或拖入图片',
+        placeholder: '问点什么… /skill 选择 Skill，@ 引用笔记，可直接粘贴或拖入图片',
       },
     });
     this.inputEl.addEventListener('keydown', (e) => this.onKeydown(e));
@@ -3674,52 +3670,6 @@ class ChatView extends ItemView {
     menu.showAtMouseEvent(ev);
   }
 
-  openSkills(ev) {
-    const menu = new Menu();
-    let list = [];
-    try {
-      list = this.plugin.skills.list();
-    } catch (e) {
-      menu.addItem((i) => i.setTitle('读取 Skill 目录失败：' + (e.message || e)).setDisabled(true));
-    }
-    const active = this.session && this.session.skillPath;
-    if (!list.length) {
-      menu.addItem((i) => i.setTitle('还没有 Skill').setDisabled(true));
-    }
-    for (const skill of list) {
-      menu.addItem((i) =>
-        i
-          .setTitle((active === skill.path ? '✓ ' : '') + skill.name)
-          .setChecked(active === skill.path)
-          .onClick(async () => {
-            this.session.skillPath = skill.path;
-            this.session.skillPinned = true;
-            delete this.session.skillAuto;
-            delete this.session.skillAuthoring;
-            this.session.updatedAt = Date.now();
-            await this.plugin.saveSettings();
-            this.updateSub();
-            new Notice('已激活 Skill：' + skill.name);
-          })
-      );
-    }
-    if (active) {
-      menu.addItem((i) =>
-        i.setTitle('清除当前 Skill').setIcon('x').onClick(async () => {
-          delete this.session.skillPath;
-          delete this.session.skillPinned;
-          delete this.session.skillAuto;
-          await this.plugin.saveSettings();
-          this.updateSub();
-          new Notice('已清除当前 Skill');
-        })
-      );
-    }
-    menu.addSeparator();
-    menu.addItem((i) => i.setTitle('管理 Skills…').setIcon('settings').onClick(() => this.plugin.openSettings('skills')));
-    menu.showAtMouseEvent(ev);
-  }
-
   async newChat() {
     if (this.isStreaming) return;
     this.sessions.create();
@@ -3907,11 +3857,47 @@ class ChatView extends ItemView {
     const el = this.inputEl;
     const pos = el.selectionStart || 0;
     const before = el.value.slice(0, pos);
+    const skillArg = before.match(/^\/skill(?:\s+([^\n]*))?$/i);
+    if (skillArg) {
+      const q = String(skillArg[1] || '').trim().toLowerCase();
+      let skills = [];
+      try {
+        skills = this.plugin.skills
+          .list()
+          .filter((skill) => {
+            const id = nodePath.basename(nodePath.dirname(skill.path));
+            return !q || skill.name.toLowerCase().includes(q) || id.toLowerCase().includes(q);
+          })
+          .slice(0, 10);
+      } catch (e) {
+        skills = [];
+      }
+      if (skills.length) {
+        this.suggestMode = 'skill';
+        this.suggestItems = skills;
+        this.suggestIndex = 0;
+        this.paintSuggest();
+        this.suggestEl.style.display = 'block';
+        return;
+      }
+      this.hideSuggest();
+      return;
+    }
+    const slash = before.match(/^\/([^\s]*)$/);
+    if (slash && 'skill'.startsWith(slash[1].toLowerCase())) {
+      this.suggestMode = 'command';
+      this.suggestItems = [{ kind: 'command', command: 'skill', label: '/skill', description: '选择并激活一个 Skill' }];
+      this.suggestIndex = 0;
+      this.paintSuggest();
+      this.suggestEl.style.display = 'block';
+      return;
+    }
     const m = before.match(/@([^\s@]*)$/);
     if (!m) {
       this.hideSuggest();
       return;
     }
+    this.suggestMode = 'note';
     const q = m[1].toLowerCase();
     const files = this.app.vault
       .getMarkdownFiles()
@@ -3933,7 +3919,15 @@ class ChatView extends ItemView {
     this.suggestItems.forEach((f, i) => {
       const row = box.createDiv({ cls: 'aip-suggest-item' });
       if (i === this.suggestIndex) row.addClass('is-active');
-      row.setText(f.path);
+      if (this.suggestMode === 'skill') {
+        row.setText(
+          f.name + ' · ' + nodePath.basename(nodePath.dirname(f.path)) + (f.description ? ' — ' + truncate(f.description, 80) : '')
+        );
+      } else if (this.suggestMode === 'command') {
+        row.setText(f.label + ' — ' + f.description);
+      } else {
+        row.setText(f.path);
+      }
       row.onmousedown = (e) => {
         e.preventDefault();
         this.pickSuggest(f);
@@ -3943,6 +3937,7 @@ class ChatView extends ItemView {
 
   hideSuggest() {
     this.suggestItems = [];
+    this.suggestMode = '';
     if (this.suggestEl) {
       this.suggestEl.style.display = 'none';
       this.suggestEl.empty();
@@ -3953,6 +3948,29 @@ class ChatView extends ItemView {
     const el = this.inputEl;
     const pos = el.selectionStart || 0;
     const before = el.value.slice(0, pos);
+    if (this.suggestMode === 'command' && f.command === 'skill') {
+      const m = before.match(/^\/([^\s]*)$/);
+      const replacement = '/skill ';
+      el.value = before.slice(0, m ? m.index : 0) + replacement + el.value.slice(pos);
+      const nextPos = (m ? m.index : 0) + replacement.length;
+      el.setSelectionRange(nextPos, nextPos);
+      this.hideSuggest();
+      this.onInput();
+      el.focus();
+      return;
+    }
+    if (this.suggestMode === 'skill') {
+      const m = before.match(/^\/skill\s+[^\s]*$/i);
+      const id = nodePath.basename(nodePath.dirname(f.path));
+      const replacement = '/skill ' + id + ' ';
+      el.value = before.slice(0, m ? m.index : 0) + replacement + el.value.slice(pos);
+      const nextPos = (m ? m.index : 0) + replacement.length;
+      el.setSelectionRange(nextPos, nextPos);
+      this.hideSuggest();
+      this.autoGrow();
+      el.focus();
+      return;
+    }
     const m = before.match(/@([^\s@]*)$/);
     if (m) el.value = before.slice(0, m.index) + el.value.slice(pos);
     this.addNoteAttachment(f.path);
@@ -4446,9 +4464,32 @@ class ChatView extends ItemView {
   async send() {
     if (this.isStreaming) return;
     const s = this.plugin.settings;
-    const text = this.inputEl.value.trim();
+    let text = this.inputEl.value.trim();
     const images = this.attachments.filter((a) => a.kind === 'image');
     if (!text && !images.length) return;
+
+    let explicitSkill = null;
+    const skillCommand = text.match(/^\/skill\s+([^\s]+)(?:\s+([\s\S]*))?$/i);
+    if (skillCommand) {
+      try {
+        explicitSkill = this.plugin.skills.find(skillCommand[1]);
+      } catch (e) {
+        new Notice('读取 Skill 失败：' + (e && e.message ? e.message : e));
+        return;
+      }
+      if (!explicitSkill) {
+        new Notice('没有找到 Skill：' + skillCommand[1]);
+        return;
+      }
+      text = String(skillCommand[2] || '').trim();
+      if (!text && !images.length) {
+        new Notice('请在 /skill 名称后继续输入任务');
+        return;
+      }
+    } else if (/^\/skill\s*$/i.test(text)) {
+      new Notice('请选择 Skill，并在后面继续输入任务');
+      return;
+    }
 
     const model = this.currentModel();
     if (!model) {
@@ -4466,9 +4507,17 @@ class ChatView extends ItemView {
       return;
     }
 
-    if (this.session.skillAuto && !this.session.skillPinned) {
-      delete this.session.skillPath;
-      delete this.session.skillAuto;
+    const session = this.session;
+    if (session.skillAuto || session.skillExplicit || session.skillPinned) {
+      delete session.skillPath;
+      delete session.skillAuto;
+      delete session.skillExplicit;
+      delete session.skillPinned;
+      this.updateSub();
+    }
+    if (explicitSkill) {
+      session.skillPath = explicitSkill.path;
+      session.skillExplicit = true;
       this.updateSub();
     }
 
@@ -4489,7 +4538,6 @@ class ChatView extends ItemView {
       time: nowTime(),
       contextRefs: refs,
     };
-    const session = this.session;
     session.messages.push(userMsg);
     this.appendMessageEl(userMsg);
 
@@ -4728,7 +4776,7 @@ class ChatView extends ItemView {
         if (tool) out.push(tool);
       }
     }
-    if (!this.session.skillPinned && !this.session.skillAuthoring) {
+    if (!this.session.skillPath && !this.session.skillAuthoring) {
       try {
         if (this.plugin.skills.list().length) {
           const activator = BUILTIN_TOOLS.find((t) => t.function.name === 'activate_skill');
@@ -4799,7 +4847,7 @@ class ChatView extends ItemView {
         sys += '\n\n【当前 Skill 无法加载】' + (e && e.message ? e.message : e);
       }
     }
-    if (!this.session.skillPinned && !this.session.skillAuthoring) {
+    if (!activeSkillPath && !this.session.skillAuthoring) {
       let catalog = [];
       try {
         catalog = this.plugin.skills.list();
@@ -5103,7 +5151,6 @@ class ChatView extends ItemView {
 const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   history: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/>',
-  sparkles: '<path d="m12 3-1.2 3.1L8 7.3l2.8 1.2L12 11.6l1.2-3.1L16 7.3l-2.8-1.2L12 3Z"/><path d="m5 14-.7 1.8L2.5 16.5l1.8.7L5 19l.7-1.8 1.8-.7-1.8-.7L5 14Z"/><path d="m19 13-.6 1.6-1.6.6 1.6.6L19 17.4l.6-1.6 1.6-.6-1.6-.6L19 13Z"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 18 5-5 4 4 3-3 4 4"/>',
   paperclip: '<path d="M20 11.5 12.5 19a4.5 4.5 0 0 1-6.4-6.4l7.6-7.6a3 3 0 0 1 4.3 4.3l-7.6 7.6a1.5 1.5 0 0 1-2.1-2.1l7-7"/>',
   dot: '<circle cx="12" cy="12" r="3"/>',
