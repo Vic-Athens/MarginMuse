@@ -23,7 +23,7 @@ const nodePath = require('path');
 const os = require('os');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.6.2';
+const VERSION = '2.6.3';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -2819,21 +2819,7 @@ class SkillStore {
   }
 
   roots() {
-    const out = [];
-    const add = (dir) => {
-      if (!dir) return;
-      const resolved = nodePath.resolve(dir);
-      if (!out.some((existing) => existing.toLowerCase() === resolved.toLowerCase())) out.push(resolved);
-    };
-    add(this.resolveRoot());
-    const adapter = this.plugin.app.vault.adapter;
-    try {
-      if (adapter.getFullPath) add(adapter.getFullPath('skills'));
-      else if (adapter.getBasePath) add(nodePath.join(adapter.getBasePath(), 'skills'));
-    } catch (e) {
-      /* The configured root can still be scanned. */
-    }
-    return out;
+    return [nodePath.resolve(this.resolveRoot())];
   }
 
   readSkillFile(filePath) {
@@ -4784,6 +4770,18 @@ class ChatView extends ItemView {
   builtinTools() {
     const s = this.plugin.settings;
     const out = [];
+    const skillAuthoringBlocked = new Set([
+      'write_file',
+      'create_folder',
+      'create_note',
+      'append_note',
+      'edit_note',
+      'delete_file',
+      'rename_file',
+      'create_canvas',
+      'edit_canvas',
+      'run_command',
+    ]);
     out.push(
       ...BUILTIN_TOOLS.filter(
         (t) =>
@@ -4794,7 +4792,8 @@ class ChatView extends ItemView {
             'activate_skill',
             'list_skill_files',
             'read_skill_file',
-          ].includes(t.function.name)
+          ].includes(t.function.name) &&
+          !(this.session.skillAuthoring && skillAuthoringBlocked.has(t.function.name))
       )
     );
     if (this.session.skillAuthoring) {
@@ -4919,6 +4918,7 @@ class ChatView extends ItemView {
         (existing.length ? '现有 Skills：' + existing.join('、') + '\n' : '现有 Skills：无\n') +
         '要求：\n' +
         '- 不要使用默认模板，不要擅自创建 scripts。\n' +
+        '- 只能使用 write_skill 保存 Skill；不要调用 write_file、create_note 或在 Vault 根目录创建 skills/。\n' +
         '- SKILL.md 说明何时使用、执行步骤、输入输出和必要约束。\n' +
         '- 内容保持精简，只写完成该工作流真正需要的信息。\n' +
         '- 保存后不要自动激活 Skill；让用户检查后再选择。';
@@ -6049,7 +6049,7 @@ class AIChatProSettingTab extends PluginSettingTab {
     };
     setup.createDiv({
       cls: 'aip-set-desc',
-      text: '每个 Skill 是一个包含 SKILL.md 的文件夹。新建时默认写入隐藏目录 .obsidian/marginmuse/skills；Vault 根目录下的 skills/ 也会自动扫描。也可以填写 ~/.codex/skills 或绝对路径。',
+      text: '每个 Skill 是一个包含 SKILL.md 的文件夹。插件只扫描这里设置的目录；默认是隐藏目录 .obsidian/marginmuse/skills。也可以填写 ~/.codex/skills 或绝对路径。',
     });
 
     let skills = [];
