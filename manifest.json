@@ -1,9 +1,9 @@
 {
   "id": "marginmuse",
   "name": "MarginMuse",
-  "version": "2.7.2",
+  "version": "3.0.0",
   "minAppVersion": "1.4.0",
-  "description": "An AI writing and vault assistant with Skills, chat, tools, Canvas, web search, MCP, and local Agent delegation.",
+  "description": "An AI writing and vault assistant with Agent mode, Skills, chat, tools, Canvas, web search, MCP, and local Agent delegation.",
   "author": "Vic-Athens",
   "isDesktopOnly": true
 }

@@ -19,6 +19,7 @@
 - An optional local Agent MCP connection with long-running task timeouts and call confirmation.
 - MCP progress updates, cancellation, recent task IDs, and continuation context.
 - Optional local MCP Bridge so a trusted Agent can request MarginMuse context and approved note writes.
+- Optional Agent mode with profiles, persona, user profile, selective memory, and persistent task state.
 - Built-in tools for models that support tool calling, with independent web and MCP toggles and per-session context tracking.
 
 ## Requirements
@@ -134,6 +135,30 @@ By default, MarginMuse gives the model a lightweight Skill catalog and lets it c
 To create a Skill, open **Settings → MarginMuse → Skills** and select **Let AI create a Skill**. MarginMuse starts a dedicated Skill Builder conversation with a prefilled request. Describe the desired workflow and the AI saves a complete `SKILL.md` through the restricted `write_skill` tool. The AI may ask follow-up questions before writing.
 
 The `write_skill` tool is available only during Skill Builder conversations, never in ordinary chat sessions.
+
+## Agent mode
+
+Agent mode is disabled by default. When disabled, MarginMuse keeps the current lightweight chat and Skill behavior.
+
+When enabled, MarginMuse loads a selected Agent Profile from the hidden `.obsidian/marginmuse/agents` directory:
+
+```text
+.obsidian/marginmuse/
+├── agents/<agent-id>/
+│   ├── AGENT.md
+│   ├── SOUL.md
+│   └── MEMORY.md
+├── users/default/PROFILE.md
+└── tasks/<session-id>.md
+```
+
+`AGENTS.md` at the vault root is loaded as optional vault-level instructions.
+
+Agent mode may substantially increase token usage because it loads persona, responsibilities, user profile, relevant long-term memory, task state, and allows longer tool loops. The settings page shows this warning before enabling.
+
+Files can be edited from **Settings → MarginMuse → Agent**. If **Allow Agent self-edit** is enabled, the Agent can request changes to its identity, memories, or user profile. Every such write requires confirmation.
+
+See [Agent mode files](docs/agent-mode.md) for loading priority and safety rules.
 
 Skill settings also provide a **Delete Skill** action. It asks for confirmation and sends the entire Skill folder to Obsidian's local trash or the operating-system trash; if neither is available, the plugin cancels the deletion instead of permanently removing files.
 
