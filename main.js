@@ -23,7 +23,7 @@ const nodePath = require('path');
 const os = require('os');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.5.3';
+const VERSION = '2.5.4';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -257,18 +257,10 @@ rl.on('line', (line) => {
 `;
 
 const DEFAULT_SETTINGS = {
-  providers: [
-    { id: 'deepseek', type: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com', apiKey: '', headers: '' },
-    { id: 'openai', type: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', apiKey: '', headers: '' },
-    { id: 'kimi', type: 'moonshot', name: 'Kimi', baseUrl: 'https://api.moonshot.cn/v1', apiKey: '', headers: '' },
-    { id: 'ollama', type: 'ollama', name: 'Ollama', baseUrl: 'http://127.0.0.1:11434/v1', apiKey: '', headers: '' },
-  ],
-  models: [
-    { id: 'deepseek-chat', providerId: 'deepseek', model: 'deepseek-chat', enable: true, vision: false, tools: true },
-    { id: 'deepseek-reasoner', providerId: 'deepseek', model: 'deepseek-reasoner', enable: true, vision: false, tools: false },
-  ],
-  chatModelId: 'deepseek-chat',
-  applyModelId: 'deepseek-chat',
+  providers: [],
+  models: [],
+  chatModelId: '',
+  applyModelId: '',
   systemPrompt:
     '你是一个严谨的中文助手，同时是 Obsidian 笔记库的操作员。回答简洁、结构清晰，必要时用 Markdown。不要编造事实。\n' +
     '可以调用工具读写这个库：搜索、读取、创建、追加、精确编辑笔记，创建和编辑 Canvas 白板。\n' +
@@ -5171,6 +5163,21 @@ class AIChatProSettingTab extends PluginSettingTab {
 
   renderModels(parent, s) {
     const box = this.section(parent, '模型', '一条模型 = 服务商 + 真实模型名。勾选「启用」后才会出现在选择器里。');
+
+    if (!s.providers.length) {
+      const empty = this.card(box);
+      empty.createDiv({ cls: 'aip-set-card-title', text: '还没有服务商' });
+      empty.createDiv({
+        cls: 'aip-set-desc',
+        text: '请先在「服务商」页添加并配置一个 OpenAI 兼容接口，再添加模型。',
+      });
+      const go = empty.createEl('button', { cls: 'mod-cta', text: '去添加服务商' });
+      go.onclick = () => {
+        this.tab = 'providers';
+        this.display();
+      };
+      return;
+    }
 
     const add = this.card(box);
     const row = add.createDiv({ cls: 'aip-set-row' });

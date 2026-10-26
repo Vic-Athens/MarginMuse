@@ -29,6 +29,8 @@ MarginMuse is desktop-only because it uses Node.js APIs for streaming requests a
 
 New installations start with both MCP tools and web access disabled. Core vault and Canvas tools remain available independently.
 
+MarginMuse does not preconfigure providers or models. Add an OpenAI-compatible provider first, then add or pull models that you actually intend to use.
+
 ## Installation
 
 Once accepted into the Obsidian Community directory, search for **MarginMuse** in:
@@ -45,8 +47,8 @@ For manual installation:
 ## Setup
 
 1. Open **Settings → MarginMuse → Providers**.
-2. Add an OpenAI-compatible provider and API key, or configure a local endpoint.
-3. Add or enable a model.
+2. Add an OpenAI-compatible provider and API key, or configure a local endpoint. No default provider is created.
+3. Add or enable a model. No default model is created.
 4. Open MarginMuse from the ribbon and start a conversation.
 5. Optionally create a Skill under **Settings → MarginMuse → Skills**, then activate it from the chat header.
 
