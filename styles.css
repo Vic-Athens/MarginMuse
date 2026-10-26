@@ -1317,3 +1317,72 @@
 .aip-ctx-ring:hover {
   background: var(--background-modifier-hover);
 }
+
+.aip-agent-create-modal {
+  width: min(560px, calc(100vw - 40px));
+}
+
+.aip-agent-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 6px;
+}
+
+.aip-agent-hint {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.6;
+}
+
+.aip-agent-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.aip-agent-field > label {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.aip-agent-field > input,
+.aip-agent-field > textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.aip-agent-field > textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.aip-agent-field-desc {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.5;
+}
+
+.aip-agent-error {
+  min-height: 1.2em;
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+}
+
+.aip-agent-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.aip-agent-editor {
+  min-height: 420px;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  line-height: 1.55;
+  resize: vertical;
+}

@@ -158,6 +158,8 @@ Agent mode may substantially increase token usage because it loads persona, resp
 
 Files can be edited from **Settings → MarginMuse → Agent**. If **Allow Agent self-edit** is enabled, the Agent can request changes to its identity, memories, or user profile. Every such write requires confirmation.
 
+Each chat session stores its own immutable `agentId`. The Agent selected in settings is only the default for new sessions; changing it does not switch an existing conversation. Use **Start a new chat with this Agent** to move to another Agent without mixing their persona, memory, or task state.
+
 See [Agent mode files](docs/agent-mode.md) for loading priority and safety rules.
 
 Skill settings also provide a **Delete Skill** action. It asks for confirmation and sends the entire Skill folder to Obsidian's local trash or the operating-system trash; if neither is available, the plugin cancels the deletion instead of permanently removing files.

@@ -24,7 +24,7 @@ const os = require('os');
 const crypto = require('crypto');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '3.0.0';
+const VERSION = '3.0.1';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -2438,9 +2438,10 @@ class VaultTools {
     return 'Agent 任务状态已更新：' + path;
   }
 
-  async agentSaveMemory(args) {
+  async agentSaveMemory(args, callerView) {
     if (!this.plugin.settings.agent.selfEdit) return 'Agent 自编辑未启用';
-    const agent = this.plugin.agents.activeAgent();
+    const view = callerView || this.plugin.activeChatView();
+    const agent = view ? this.plugin.agents.agentForSession(view.session) : null;
     if (!agent) return '没有激活的 Agent';
     const fact = String(args.fact || '').trim();
     if (!fact) return '记忆内容不能为空';
@@ -2453,9 +2454,10 @@ class VaultTools {
     return '已写入 Agent 长期记忆';
   }
 
-  async agentUpdateIdentity(args) {
+  async agentUpdateIdentity(args, callerView) {
     if (!this.plugin.settings.agent.selfEdit) return 'Agent 自编辑未启用';
-    const agent = this.plugin.agents.activeAgent();
+    const view = callerView || this.plugin.activeChatView();
+    const agent = view ? this.plugin.agents.agentForSession(view.session) : null;
     if (!agent) return '没有激活的 Agent';
     const file = String(args.file || '').toUpperCase();
     if (!['AGENT', 'SOUL'].includes(file)) return '只能修改 AGENT 或 SOUL';
@@ -2898,9 +2900,9 @@ class VaultTools {
       case 'agent_update_task':
         return this.agentUpdateTask(args, callerView);
       case 'agent_save_memory':
-        return this.agentSaveMemory(args);
+        return this.agentSaveMemory(args, callerView);
       case 'agent_update_identity':
-        return this.agentUpdateIdentity(args);
+        return this.agentUpdateIdentity(args, callerView);
       case 'agent_update_profile':
         return this.agentUpdateProfile(args);
       case 'list_skill_files':
@@ -3223,7 +3225,14 @@ class SessionStore {
 
   create() {
     const s = this.plugin.settings;
-    const session = { id: uid('s'), title: '新对话', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+    const session = {
+      id: uid('s'),
+      title: '新对话',
+      messages: [],
+      agentId: s.agent && s.agent.mode ? s.agent.activeAgentId || '' : '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
     this.list.unshift(session);
     if (this.list.length > 50) this.list.length = 50;
     s.activeSessionId = session.id;
@@ -3622,10 +3631,22 @@ class AgentStore {
     return out.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  activeAgent() {
-    const id = String((this.plugin.settings.agent && this.plugin.settings.agent.activeAgentId) || '');
+  activeAgent(agentId) {
+    const id = String(
+      agentId == null
+        ? (this.plugin.settings.agent && this.plugin.settings.agent.activeAgentId) || ''
+        : agentId || ''
+    );
     if (!id) return null;
     return this.listAgents().find((agent) => agent.id === id) || null;
+  }
+
+  agentForSession(session) {
+    const id =
+      session && session.agentId
+        ? session.agentId
+        : (this.plugin.settings.agent && this.plugin.settings.agent.activeAgentId) || '';
+    return this.activeAgent(id);
   }
 
   agentFile(agentId, file) {
@@ -3782,7 +3803,7 @@ class AgentStore {
   }
 
   context(session, query) {
-    const agent = this.activeAgent();
+    const agent = this.agentForSession(session);
     if (!agent) return { agent: null, text: '' };
     const agentText = truncate(this.readFile(agent.id, 'AGENT'), 30000);
     const soul = truncate(this.readFile(agent.id, 'SOUL'), 20000);
@@ -3942,27 +3963,42 @@ class AgentCreatorModal extends Modal {
   }
 
   onOpen() {
+    this.modalEl.addClass('aip-agent-create-modal');
     this.titleEl.setText('新建 Agent');
-    const name = this.contentEl.createEl('input', {
-      cls: 'aip-set-input',
-      attr: { placeholder: 'Agent 名称，如 小说编辑' },
+    const form = this.contentEl.createDiv({ cls: 'aip-agent-form' });
+    form.createDiv({
+      cls: 'aip-agent-hint',
+      text: '创建后会生成独立的 AGENT.md、SOUL.md 和 MEMORY.md。每个会话会绑定创建时选择的 Agent。',
     });
-    name.style.width = '100%';
-    const description = this.contentEl.createEl('textarea', {
+    const nameField = form.createDiv({ cls: 'aip-agent-field' });
+    nameField.createEl('label', { text: 'Agent 名称' });
+    const name = nameField.createEl('input', {
       cls: 'aip-set-input',
-      attr: { placeholder: '职责与使用场景' },
+      attr: { placeholder: '例如：小说编辑、资料研究员' },
     });
-    description.rows = 4;
-    description.style.width = '100%';
-    const row = this.contentEl.createDiv({ cls: 'aip-confirm-row' });
+    const error = form.createDiv({ cls: 'aip-agent-error' });
+    const descField = form.createDiv({ cls: 'aip-agent-field' });
+    descField.createEl('label', { text: '职责说明' });
+    descField.createDiv({
+      cls: 'aip-agent-field-desc',
+      text: '说明它负责什么、适合处理哪些任务，以及不应该做什么。',
+    });
+    const description = descField.createEl('textarea', {
+      cls: 'aip-set-input',
+      attr: { placeholder: '例如：负责长篇小说的结构梳理、连续性检查和文字润色。' },
+    });
+    description.rows = 5;
+    const row = form.createDiv({ cls: 'aip-agent-create-actions' });
     const cancel = row.createEl('button', { text: '取消' });
     const create = row.createEl('button', { cls: 'mod-cta', text: '创建' });
     cancel.onclick = () => this.close();
     create.onclick = async () => {
       if (!name.value.trim()) {
-        new Notice('Agent 名称不能为空');
+        error.setText('请填写 Agent 名称');
+        name.focus();
         return;
       }
+      error.setText('');
       create.disabled = true;
       try {
         const agent = await this.onCreate(name.value.trim(), description.value.trim());
@@ -3970,9 +4006,10 @@ class AgentCreatorModal extends Modal {
         return agent;
       } catch (e) {
         create.disabled = false;
-        new Notice('创建 Agent 失败：' + (e && e.message ? e.message : e));
+        error.setText('创建失败：' + (e && e.message ? e.message : e));
       }
     };
+    name.addEventListener('input', () => error.setText(''));
     setTimeout(() => name.focus(), 50);
   }
 
@@ -4206,7 +4243,7 @@ class ChatView extends ItemView {
     if (this.plugin.settings.agent && this.plugin.settings.agent.mode) {
       let agent = null;
       try {
-        agent = this.plugin.agents.activeAgent();
+        agent = this.plugin.agents.agentForSession(this.session);
       } catch (e) {
         agent = null;
       }
@@ -5429,12 +5466,15 @@ class ChatView extends ItemView {
       new Notice('「' + provider.name + '」还没填 API Key');
       return;
     }
-    if (s.agent && s.agent.mode && !this.plugin.agents.activeAgent()) {
-      new Notice('Agent 模式已开启，但还没有选择或创建 Agent');
-      return;
-    }
-
     const session = this.session;
+    if (s.agent && s.agent.mode) {
+      const agent = this.plugin.agents.agentForSession(session);
+      if (!agent) {
+        new Notice('Agent 模式已开启，但当前会话没有有效 Agent');
+        return;
+      }
+      if (!session.agentId) session.agentId = agent.id;
+    }
     if (session.skillAuto || session.skillExplicit || session.skillPinned) {
       delete session.skillPath;
       delete session.skillAuto;
@@ -6490,6 +6530,7 @@ class AIChatProSettingTab extends PluginSettingTab {
     const createCard = this.card(box);
     const createRow = createCard.createDiv({ cls: 'aip-set-row' });
     if (agents.length) {
+      createRow.createSpan({ cls: 'aip-set-label', text: '新会话默认 Agent' });
       const select = createRow.createEl('select', { cls: 'dropdown' });
       for (const agent of agents) select.createEl('option', { value: agent.id, text: agent.name });
       select.value = s.agent.activeAgentId || (agents[0] && agents[0].id) || '';
@@ -6527,6 +6568,14 @@ class AIChatProSettingTab extends PluginSettingTab {
       }
       const profile = actions.createEl('button', { text: '编辑用户画像' });
       profile.onclick = () => this.editAgentFile(null, 'PROFILE');
+      const newSession = actions.createEl('button', { cls: 'mod-cta', text: '用此 Agent 新建会话' });
+      newSession.onclick = async () => {
+        s.agent.activeAgentId = active.id;
+        s.agent.mode = true;
+        await this.plugin.saveSettings();
+        this.app.setting.close();
+        await this.plugin.startAgentChat(active.id);
+      };
     }
 
     new Setting(box)
@@ -7677,6 +7726,33 @@ class AIChatProPlugin extends Plugin {
     }
     await this.saveSettings();
     this.refreshViews();
+  }
+
+  async startAgentChat(agentId) {
+    const agent = this.agents.activeAgent(agentId);
+    if (!agent) {
+      new Notice('Agent 不存在：' + agentId);
+      return;
+    }
+    const view = await this.activateView();
+    if (!view) {
+      new Notice('无法打开 MarginMuse 对话面板');
+      return;
+    }
+    if (view.isStreaming) {
+      new Notice('请先停止当前回复，再切换 Agent');
+      return;
+    }
+    this.settings.agent.activeAgentId = agent.id;
+    this.settings.agent.mode = true;
+    await this.saveSettings();
+    await view.newChat();
+    view.session.agentId = agent.id;
+    view.session.updatedAt = Date.now();
+    await this.saveSettings();
+    view.updateSub();
+    view.inputEl.focus();
+    new Notice('已新建「' + agent.name + '」会话');
   }
 
   async startSkillAuthoring() {
