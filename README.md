@@ -14,7 +14,9 @@
 - File and folder deletion through the Obsidian trash.
 - Canvas creation and editing.
 - Web search with automatic source fallback and official Obsidian changelog support.
+- User-authored Skills in standard `SKILL.md` format, with no bundled defaults.
 - MCP support over local `stdio` or streamable HTTP.
+- An optional local Agent MCP connection with long-running task timeouts and call confirmation.
 - Optional AI tool calling, web access, and per-session context tracking.
 
 ## Requirements
@@ -44,6 +46,7 @@ For manual installation:
 2. Add an OpenAI-compatible provider and API key, or configure a local endpoint.
 3. Add or enable a model.
 4. Open MarginMuse from the ribbon and start a conversation.
+5. Optionally create a Skill under **Settings → MarginMuse → Skills**, then activate it from the chat header.
 
 For use with restricted or untrusted notes, disable tool calling or review every requested file operation.
 
@@ -56,6 +59,8 @@ MarginMuse has no telemetry and does not include ads.
 - Web search queries are sent to Bing and, when a reliable fallback is needed, Baidu, Sogou, or 360.
 - `web_fetch` requests the URL supplied by the user or requested through the model.
 - Optional MCP servers may start local processes and may access resources according to their own configuration.
+- A local Agent MCP server may receive the task text and selected context needed to complete a delegated task.
+- A Skill directory can point to a vault folder or an absolute local path chosen by the user.
 - Copying an assistant reply writes its text to the system clipboard.
 - API keys and settings are stored locally in the plugin's `data.json`.
 
@@ -71,6 +76,22 @@ Model output can still be incorrect. Review generated edits, Canvas changes, and
 
 MarginMuse supports MCP servers over `stdio` and streamable HTTP. Only connect MCP servers you trust. A local MCP command runs with the permissions of the Obsidian process.
 
+Local Agent presets are disabled by default. When a server is marked as a complex-task Agent, MarginMuse asks for confirmation before each call. Configure the server timeout according to the expected task duration.
+
+See [Local Agent MCP contract](docs/agent-mcp.md) for the recommended adapter tools and response fields.
+
+## Skills
+
+MarginMuse loads user-authored Skills from the configured Skill root. It does not bundle default Skills and does not execute scripts found inside a Skill.
+
+```text
+MarginMuse Skills/
+└── example-skill/
+    └── SKILL.md
+```
+
+`SKILL.md` uses frontmatter with at least `name` and `description`. Activate a Skill from the chat header. It applies only to the current chat session.
+
 ## 中文说明
 
 MarginMuse（页语）是一款面向 Obsidian 的双语 AI 写作与笔记助手，支持多会话、笔记上下文、文件工具、Canvas 白板、联网搜索和 MCP。
@@ -81,6 +102,8 @@ MarginMuse（页语）是一款面向 Obsidian 的双语 AI 写作与笔记助�
 - 联网搜索会访问 Bing，必要时会后备到百度、搜狗或 360。
 - 启用 AI 工具后，模型可以读取和修改当前库中的文件。
 - 本地 MCP 服务会以 Obsidian 进程的权限运行，请只连接可信服务。
+- 本地复杂任务 Agent 默认停用，每次调用前会要求确认。
+- Skill 可以由用户自行创建，插件不内置默认 Skill，也不会自动执行 Skill scripts。
 - API Key 保存在本地插件目录的 `data.json` 中。
 
 ## Development
