@@ -2,7 +2,7 @@
 
 MarginMuse is an MCP client. A local Agent can be connected by implementing an MCP server and configuring its `stdio` command or streamable HTTP URL in MarginMuse.
 
-This first version supports delegation from MarginMuse to the Agent. A reverse MarginMuse MCP bridge is not enabled automatically.
+The current implementation supports delegation from MarginMuse to the Agent, progress notifications, cancellation, and recent task/thread recovery. A reverse MarginMuse MCP bridge is not enabled automatically.
 
 Skills use a separate local directory and do not require MCP. The default Skill root is `.obsidian/marginmuse/skills`; an active Skill can access only its own directory through the restricted Skill file tools.
 
@@ -58,6 +58,10 @@ A useful result shape is:
 ```
 
 The adapter may expose different tool names. MarginMuse discovers MCP tool schemas dynamically.
+
+For long-running tools, send MCP `notifications/progress` with the `progressToken` supplied by MarginMuse. Progress is displayed in the tool card for both `stdio` and streamable HTTP transports.
+
+When a result includes `threadId` or `taskId`, MarginMuse retains recent IDs in the chat session and adds them to later model context so a compatible reply/continue tool can resume the task. Stopping generation cancels active MCP requests.
 
 ## Codex compatibility preset
 
