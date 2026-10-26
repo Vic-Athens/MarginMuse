@@ -23,7 +23,7 @@ const nodePath = require('path');
 const os = require('os');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.5.0';
+const VERSION = '2.5.1';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -298,7 +298,7 @@ const DEFAULT_SETTINGS = {
     chunkCount: 0,
   },
   mcp: { servers: [] },
-  skillRoot: 'MarginMuse Skills',
+  skillRoot: '.obsidian/marginmuse/skills',
   sessions: [],
   activeSessionId: '',
 };
@@ -350,6 +350,28 @@ const BUILTIN_TOOLS = [
           content: { type: 'string', description: '完整 SKILL.md，包含 name 和 description frontmatter，不要用外层代码围栏包裹' },
         },
         required: ['name', 'description', 'content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_skill_files',
+      description: '列出当前激活 Skill 目录中的文件路径。仅在 Skill 已激活时可用，用于发现 references 和 assets。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_skill_file',
+      description: '读取当前激活 Skill 目录中的文本文件。路径必须相对于 Skill 目录，不能访问目录外文件。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '相对于 Skill 目录的文件路径，如 references/guide.md' },
+        },
+        required: ['path'],
       },
     },
   },
@@ -1861,6 +1883,22 @@ class VaultTools {
     return '已保存 Skill：' + saved.name + '\n路径：' + saved.path;
   }
 
+  async listSkillFiles() {
+    const skillPath = this.plugin.skills.activePath();
+    if (!skillPath) return '当前没有激活的 Skill';
+    const files = this.plugin.skills.listBundleFiles(skillPath);
+    return files.length ? files.join('\n') : '这个 Skill 只有 SKILL.md';
+  }
+
+  async readSkillFile(args) {
+    const skillPath = this.plugin.skills.activePath();
+    if (!skillPath) return '当前没有激活的 Skill';
+    const rel = String(args.path || '').trim();
+    if (!rel) return '缺少 Skill 文件路径';
+    const content = this.plugin.skills.readBundleFile(skillPath, rel);
+    return 'Skill 文件：' + rel + '\n\n' + content.slice(0, 20000);
+  }
+
   async readFile(args) {
     const path = normToolPath(args.path);
     const f = this.app.vault.getAbstractFileByPath(path);
@@ -2238,6 +2276,10 @@ class VaultTools {
         return this.createFolder(args);
       case 'write_skill':
         return this.writeSkill(args);
+      case 'list_skill_files':
+        return this.listSkillFiles();
+      case 'read_skill_file':
+        return this.readSkillFile(args);
       case 'read_file':
         return this.readFile(args);
       case 'write_file':
@@ -2601,7 +2643,7 @@ class SkillStore {
   }
 
   configuredRoot() {
-    return String(this.plugin.settings.skillRoot || 'MarginMuse Skills').trim();
+    return String(this.plugin.settings.skillRoot || '.obsidian/marginmuse/skills').trim();
   }
 
   resolveRoot() {
@@ -2685,6 +2727,58 @@ class SkillStore {
     };
     walk(root, 0);
     return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  activePath() {
+    const leaves = this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE);
+    for (const leaf of leaves) {
+      if (leaf.view instanceof ChatView && leaf.view.session && leaf.view.session.skillPath) {
+        return leaf.view.session.skillPath;
+      }
+    }
+    return '';
+  }
+
+  listBundleFiles(skillPath) {
+    const skill = this.load(skillPath);
+    const root = nodePath.dirname(skill.path);
+    const out = [];
+    const walk = (dir, depth) => {
+      if (depth > 4 || out.length >= 200) return;
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch (e) {
+        return;
+      }
+      for (const entry of entries) {
+        if (out.length >= 200) break;
+        const full = nodePath.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full, depth + 1);
+        } else if (entry.isFile()) {
+          out.push(nodePath.relative(root, full).replace(/\\/g, '/'));
+        }
+      }
+    };
+    walk(root, 0);
+    return out.sort();
+  }
+
+  readBundleFile(skillPath, relativePath) {
+    const skill = this.load(skillPath);
+    const root = nodePath.dirname(skill.path);
+    const rel = String(relativePath || '').replace(/\\/g, '/').trim();
+    if (!rel || nodePath.isAbsolute(rel) || rel.split('/').some((part) => part === '..')) {
+      throw new Error('Skill 文件路径必须是 Skill 目录内的相对路径');
+    }
+    const target = nodePath.resolve(root, rel);
+    const prefix = root.endsWith(nodePath.sep) ? root : root + nodePath.sep;
+    if (target !== root && !target.startsWith(prefix)) throw new Error('Skill 文件路径越界');
+    const stat = fs.statSync(target);
+    if (!stat.isFile()) throw new Error('不是文件：' + rel);
+    if (stat.size > 100 * 1024) throw new Error('Skill 文件超过 100 KB');
+    return fs.readFileSync(target, 'utf8');
   }
 
   load(skillPath) {
@@ -4386,12 +4480,21 @@ class ChatView extends ItemView {
     if (s.enableTools) {
       out.push(
         ...BUILTIN_TOOLS.filter(
-          (t) => !['web_search', 'web_fetch', 'write_skill'].includes(t.function.name)
+          (t) =>
+            !['web_search', 'web_fetch', 'write_skill', 'list_skill_files', 'read_skill_file'].includes(
+              t.function.name
+            )
         )
       );
       if (this.session.skillAuthoring) {
         const writer = BUILTIN_TOOLS.find((t) => t.function.name === 'write_skill');
         if (writer) out.push(writer);
+      }
+      if (this.session.skillPath) {
+        for (const name of ['list_skill_files', 'read_skill_file']) {
+          const tool = BUILTIN_TOOLS.find((t) => t.function.name === name);
+          if (tool) out.push(tool);
+        }
       }
     }
     // 联网工具，受 enableWebTools 独立控制
@@ -4446,7 +4549,7 @@ class ChatView extends ItemView {
           skill.name +
           '\n目录：' +
           nodePath.dirname(skill.path) +
-          '\n执行该 Skill 的流程与约束。需要参考资料时，只读取该目录下与任务直接相关的内容；' +
+          '\n执行该 Skill 的流程与约束。需要参考资料时，先用 list_skill_files 查看目录，再用 read_skill_file 读取与任务直接相关的内容；' +
           '不得执行 Skill 中的 scripts，除非用户通过 MCP 或明确授权另行执行。\n\n' +
           '<<<SKILL\n' +
           truncate(skill.content, 40000) +
@@ -5544,12 +5647,12 @@ class AIChatProSettingTab extends PluginSettingTab {
     const row = setup.createDiv({ cls: 'aip-set-row' });
     const rootInput = row.createEl('input', {
       cls: 'aip-set-input',
-      attr: { placeholder: 'MarginMuse Skills 或绝对路径' },
+      attr: { placeholder: '.obsidian/marginmuse/skills 或绝对路径' },
     });
-    rootInput.value = s.skillRoot || 'MarginMuse Skills';
+    rootInput.value = s.skillRoot || '.obsidian/marginmuse/skills';
     rootInput.style.flex = '1';
     const saveRoot = async () => {
-      s.skillRoot = rootInput.value.trim() || 'MarginMuse Skills';
+      s.skillRoot = rootInput.value.trim() || '.obsidian/marginmuse/skills';
       await this.plugin.saveSettings();
       this.display();
     };
@@ -5563,7 +5666,7 @@ class AIChatProSettingTab extends PluginSettingTab {
     };
     setup.createDiv({
       cls: 'aip-set-desc',
-      text: '每个 Skill 是一个包含 SKILL.md 的文件夹。相对路径位于当前 Vault；也可以填写 ~/.codex/skills 或绝对路径。',
+      text: '每个 Skill 是一个包含 SKILL.md 的文件夹。默认放在隐藏目录 .obsidian/marginmuse/skills，不会出现在普通文件列表；也可以填写 ~/.codex/skills 或绝对路径。',
     });
 
     let skills = [];
@@ -5609,9 +5712,10 @@ class AIChatProSettingTab extends PluginSettingTab {
       } catch (e) {
         relative = '';
       }
-      const open = actions.createEl('button', { text: relative ? '打开 SKILL.md' : '复制路径' });
+      const hiddenPath = relative.startsWith('.obsidian/');
+      const open = actions.createEl('button', { text: relative && !hiddenPath ? '打开 SKILL.md' : '复制路径' });
       open.onclick = async () => {
-        if (relative) {
+        if (relative && !hiddenPath) {
           await this.app.workspace.openLinkText(relative, '', false);
         } else {
           await navigator.clipboard.writeText(skill.path);
@@ -5884,7 +5988,7 @@ class AIChatProPlugin extends Plugin {
     if (!Array.isArray(this.settings.providers)) this.settings.providers = [];
     if (!Array.isArray(this.settings.models)) this.settings.models = [];
     if (typeof this.settings.skillRoot !== 'string' || !this.settings.skillRoot.trim()) {
-      this.settings.skillRoot = 'MarginMuse Skills';
+      this.settings.skillRoot = '.obsidian/marginmuse/skills';
     }
     if (!Array.isArray(this.settings.sessions)) this.settings.sessions = [];
     if (!this.settings.rag) this.settings.rag = Object.assign({}, DEFAULT_SETTINGS.rag);

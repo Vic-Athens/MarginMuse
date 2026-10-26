@@ -4,6 +4,8 @@ MarginMuse is an MCP client. A local Agent can be connected by implementing an M
 
 This first version supports delegation from MarginMuse to the Agent. A reverse MarginMuse MCP bridge is not enabled automatically.
 
+Skills use a separate local directory and do not require MCP. The default Skill root is `.obsidian/marginmuse/skills`; an active Skill can access only its own directory through the restricted Skill file tools.
+
 ## Configuration
 
 For `stdio`, provide:

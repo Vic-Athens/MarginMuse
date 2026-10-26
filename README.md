@@ -82,15 +82,17 @@ See [Local Agent MCP contract](docs/agent-mcp.md) for the recommended adapter to
 
 ## Skills
 
-MarginMuse loads user-authored Skills from the configured Skill root. It does not bundle default Skills and does not execute scripts found inside a Skill.
+MarginMuse loads user-authored Skills from the configured Skill root. The default root is `.obsidian/marginmuse/skills`, so Skill files stay out of the normal vault file list. It does not bundle default Skills and does not execute scripts found inside a Skill.
 
 ```text
-MarginMuse Skills/
+.obsidian/marginmuse/skills/
 └── example-skill/
     └── SKILL.md
 ```
 
 `SKILL.md` uses frontmatter with at least `name` and `description`. Activate a Skill from the chat header. It applies only to the current chat session.
+
+For an active Skill, AI tools can list and read only files inside that Skill directory through the restricted `list_skill_files` and `read_skill_file` tools.
 
 To create a Skill, open **Settings → MarginMuse → Skills** and select **Let AI create a Skill**. MarginMuse starts a dedicated Skill Builder conversation with a prefilled request. Describe the desired workflow and the AI saves a complete `SKILL.md` through the restricted `write_skill` tool. The AI may ask follow-up questions before writing.
 
