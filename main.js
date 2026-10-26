@@ -23,7 +23,7 @@ const nodePath = require('path');
 const os = require('os');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.6.1';
+const VERSION = '2.6.2';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -2818,6 +2818,24 @@ class SkillStore {
     throw new Error('当前 Vault 不支持本地 Skill 目录');
   }
 
+  roots() {
+    const out = [];
+    const add = (dir) => {
+      if (!dir) return;
+      const resolved = nodePath.resolve(dir);
+      if (!out.some((existing) => existing.toLowerCase() === resolved.toLowerCase())) out.push(resolved);
+    };
+    add(this.resolveRoot());
+    const adapter = this.plugin.app.vault.adapter;
+    try {
+      if (adapter.getFullPath) add(adapter.getFullPath('skills'));
+      else if (adapter.getBasePath) add(nodePath.join(adapter.getBasePath(), 'skills'));
+    } catch (e) {
+      /* The configured root can still be scanned. */
+    }
+    return out;
+  }
+
   readSkillFile(filePath) {
     const stat = fs.statSync(filePath);
     if (stat.size > 512 * 1024) throw new Error('SKILL.md 超过 512 KB');
@@ -2855,8 +2873,7 @@ class SkillStore {
   }
 
   list() {
-    const root = this.resolveRoot();
-    if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) return [];
+    const roots = this.roots();
     const out = [];
     let visited = 0;
     const walk = (dir, depth) => {
@@ -2882,8 +2899,22 @@ class SkillStore {
         }
       }
     };
-    walk(root, 0);
-    return out.sort((a, b) => a.name.localeCompare(b.name));
+    for (const root of roots) {
+      try {
+        if (fs.existsSync(root) && fs.statSync(root).isDirectory()) walk(root, 0);
+      } catch (e) {
+        /* Skip an unavailable root and continue with the others. */
+      }
+    }
+    const seen = new Set();
+    return out
+      .filter((skill) => {
+        const key = nodePath.resolve(skill.path).toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   activePath() {
@@ -6018,7 +6049,7 @@ class AIChatProSettingTab extends PluginSettingTab {
     };
     setup.createDiv({
       cls: 'aip-set-desc',
-      text: '每个 Skill 是一个包含 SKILL.md 的文件夹。默认放在隐藏目录 .obsidian/marginmuse/skills，不会出现在普通文件列表；也可以填写 ~/.codex/skills 或绝对路径。',
+      text: '每个 Skill 是一个包含 SKILL.md 的文件夹。新建时默认写入隐藏目录 .obsidian/marginmuse/skills；Vault 根目录下的 skills/ 也会自动扫描。也可以填写 ~/.codex/skills 或绝对路径。',
     });
 
     let skills = [];

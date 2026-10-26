@@ -93,6 +93,8 @@ See [Local Agent MCP contract](docs/agent-mcp.md) for the recommended adapter to
 
 MarginMuse loads user-authored Skills from the configured Skill root. The default root is `.obsidian/marginmuse/skills`, so Skill files stay out of the normal vault file list. It does not bundle default Skills and does not execute scripts found inside a Skill.
 
+For compatibility, a visible vault folder named `skills/` is also scanned automatically. Newly created Skills still default to the hidden root.
+
 ```text
 .obsidian/marginmuse/skills/
 └── example-skill/
