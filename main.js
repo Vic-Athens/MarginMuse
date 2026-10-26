@@ -23,7 +23,7 @@ const nodePath = require('path');
 const os = require('os');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.6.6';
+const VERSION = '2.6.7';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -4191,6 +4191,7 @@ class ChatView extends ItemView {
       images.forEach((im) => {
         const img = strip.createEl('img', { cls: 'aip-msg-image' });
         img.src = im.dataUrl;
+        img.addEventListener('load', () => this.scrollBottom());
       });
     }
     if (text) {
@@ -4235,6 +4236,7 @@ class ChatView extends ItemView {
       const md = container.createDiv({ cls: 'aip-msg-text' });
       await MarkdownRenderer.render(this.app, text.slice(last), md, '', this).catch(() => md.setText(text.slice(last)));
     }
+    this.scrollBottom();
   }
 
   renderChoiceCard(container, data) {
@@ -4279,7 +4281,14 @@ class ChatView extends ItemView {
   }
 
   scrollBottom() {
-    this.listEl.scrollTop = this.listEl.scrollHeight;
+    if (!this.listEl) return;
+    const toBottom = () => {
+      if (this.listEl) this.listEl.scrollTop = this.listEl.scrollHeight;
+    };
+    toBottom();
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => requestAnimationFrame(toBottom));
+    }
   }
 
   /** 用量行：↑输入 ↓输出（思考 X）· 上下文占用 */
