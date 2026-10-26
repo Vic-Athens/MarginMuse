@@ -23,7 +23,7 @@ const nodePath = require('path');
 const os = require('os');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.6.5';
+const VERSION = '2.6.6';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -3011,16 +3011,38 @@ class SkillStore {
   }
 
   async trashPath(path) {
-    let electronShell;
+    const adapter = this.plugin.app.vault.adapter;
+    const base = adapter.getBasePath ? adapter.getBasePath() : '';
+    let relative = '';
+    if (base) {
+      relative = nodePath.relative(base, path).replace(/\\/g, '/');
+      if (!relative || relative.startsWith('../') || nodePath.isAbsolute(relative)) relative = '';
+    }
+    if (relative) {
+      if (typeof adapter.trashSystem === 'function') {
+        try {
+          const moved = await adapter.trashSystem(relative);
+          if (moved !== false) return;
+        } catch (e) {
+          /* Try Obsidian's local vault trash below. */
+        }
+      }
+      if (typeof adapter.trashLocal === 'function') {
+        await adapter.trashLocal(relative);
+        return;
+      }
+    }
+
     try {
-      electronShell = require('electron').shell;
+      const electronShell = require('electron').shell;
+      if (electronShell && typeof electronShell.trashItem === 'function') {
+        await electronShell.trashItem(path);
+        return;
+      }
     } catch (e) {
-      throw new Error('当前环境无法访问系统回收站');
+      /* Fall through to the safe failure below. */
     }
-    if (!electronShell || typeof electronShell.trashItem !== 'function') {
-      throw new Error('当前环境不支持系统回收站');
-    }
-    await electronShell.trashItem(path);
+    throw new Error('回收站不可用，文件未删除');
   }
 
   async delete(skillPath) {

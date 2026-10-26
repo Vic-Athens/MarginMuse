@@ -111,7 +111,7 @@ To create a Skill, open **Settings → MarginMuse → Skills** and select **Let 
 
 The `write_skill` tool is available only during Skill Builder conversations, never in ordinary chat sessions.
 
-Skill settings also provide a **Delete Skill** action. It asks for confirmation and sends the entire Skill folder to the operating system trash; if trash is unavailable, the plugin cancels the deletion instead of permanently removing files.
+Skill settings also provide a **Delete Skill** action. It asks for confirmation and sends the entire Skill folder to Obsidian's local trash or the operating-system trash; if neither is available, the plugin cancels the deletion instead of permanently removing files.
 
 ## 中文说明
 
