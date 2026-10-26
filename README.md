@@ -56,6 +56,14 @@ For manual installation:
 
 For use with restricted or untrusted notes, choose a model with tool calling disabled or review every requested file operation.
 
+Tool execution has three independent safeguards under **Settings → MarginMuse → Chat**:
+
+- Maximum consecutive tool rounds, default `8`.
+- Maximum total tool calls per request, default `20`.
+- Maximum tool runtime, default `5` minutes.
+
+Repeated identical tool calls are blocked after two executions, and the model is asked to summarize available results when a limit is reached.
+
 ## Network and privacy
 
 MarginMuse has no telemetry and does not include ads.

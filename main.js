@@ -24,7 +24,7 @@ const os = require('os');
 const crypto = require('crypto');
 
 const VIEW_TYPE = 'marginmuse-view';
-const VERSION = '2.7.1';
+const VERSION = '2.7.2';
 const MAX_TOOL_RESULT = 12000;
 
 /* 思考等级档位（对应 DeepSeek 的 reasoning_effort） */
@@ -276,7 +276,9 @@ const DEFAULT_SETTINGS = {
   webEngines: ['bing'],
   /* 自定义搜索源：{ id, name, method, url, headers, body, note }，url/body 里用 {q} 占位 */
   customEngines: [],
-  maxAutoIterations: 6,
+  maxAutoIterations: 8,
+  maxToolCalls: 20,
+  maxToolMinutes: 5,
   temperature: 0.6,
   maxContextChars: 0,
   reasoningEffort: 'high',
@@ -4738,14 +4740,14 @@ class ChatView extends ItemView {
     new Notice('已存为 ' + path);
   }
 
-  addToolCard(name, argsText, parent) {
+  addToolCard(name, argsText, parent, meta) {
     const card = document.createElement('div');
     card.className = 'aip-tool';
     const host = parent && parent.querySelector ? parent.querySelector('.aip-msg-text') : null;
     if (parent && host) parent.insertBefore(card, host);
     else if (parent) parent.appendChild(card);
     else this.listEl.appendChild(card);
-    card.createDiv({ cls: 'aip-tool-head', text: '工具 · ' + name });
+    card.createDiv({ cls: 'aip-tool-head', text: '工具 · ' + (meta ? meta + ' · ' : '') + name });
     const body = card.createDiv({ cls: 'aip-tool-body', text: argsText });
     this.scrollBottom();
     return {
@@ -4977,16 +4979,31 @@ class ChatView extends ItemView {
     const usageAcc = { prompt: 0, completion: 0, reasoning: 0 };
     let lastUsage = null;
     try {
-      const maxRounds = Math.max(1, Number(s.maxAutoIterations) || 6);
+      const maxRounds = Math.max(1, Math.min(30, Number(s.maxAutoIterations) || 8));
+      const maxToolCalls = Math.max(1, Math.min(100, Number(s.maxToolCalls) || 20));
+      const maxToolMs = Math.max(1, Math.min(30, Number(s.maxToolMinutes) || 5)) * 60000;
+      const toolStartedAt = Date.now();
+      const callCounts = new Map();
+      let totalToolCalls = 0;
+      let forceFinal = false;
+      let finalPromptAdded = false;
+      let limitReason = '';
       // 多留一轮：轮数用尽后明确禁止调用工具，逼模型基于已有结果作答
       for (let round = 0; round <= maxRounds; round++) {
-        const finalRound = round === maxRounds;
+        if (!forceFinal && Date.now() - toolStartedAt >= maxToolMs) {
+          forceFinal = true;
+          limitReason = '工具运行时间已达到 ' + Math.round(maxToolMs / 60000) + ' 分钟上限';
+        }
+        const finalRound = round === maxRounds || forceFinal;
         const roundTools = this.collectTools(model);
-        if (finalRound) {
+        if (finalRound && !finalPromptAdded) {
           payload.push({
             role: 'system',
-            content: '你已经用完了自动调用工具的机会。请基于以上所有工具返回的结果，直接给用户最终的回答和总结，不要再调用任何工具，也不要输出工具调用格式的标签。',
+            content:
+              (limitReason ? limitReason + '。' : '你已经用完了自动调用工具的机会。') +
+              '请基于以上所有工具返回的结果，直接给用户最终的回答或阶段总结；不要再调用任何工具，也不要输出工具调用格式的标签。',
           });
+          finalPromptAdded = true;
         }
         const handle = streamChat({
           baseUrl: provider.baseUrl,
@@ -4994,7 +5011,7 @@ class ChatView extends ItemView {
           headersText: provider.headers,
           model: model.model,
           messages: payload,
-          tools: roundTools,
+          tools: finalRound ? [] : roundTools,
           toolChoice: finalRound ? 'none' : 'auto',
           temperature: Number(s.temperature),
           reasoningEffort: s.reasoningEffort || 'high',
@@ -5045,6 +5062,11 @@ class ChatView extends ItemView {
           lastUsage = result.usage;
         }
 
+        if (finalRound && result.toolCalls && result.toolCalls.length) {
+          acc = result.text || acc;
+          break;
+        }
+
         if (result.toolCalls && result.toolCalls.length) {
           payload.push({ role: 'assistant', content: result.text || '', tool_calls: result.toolCalls });
           for (const tc of result.toolCalls) {
@@ -5057,16 +5079,43 @@ class ChatView extends ItemView {
               badJson = String((e && e.message) || e);
               args = {};
             }
-            const card = this.addToolCard(fn, truncate(JSON.stringify(args), 240), body);
+            const card = this.addToolCard(
+              fn,
+              truncate(JSON.stringify(args), 240),
+              body,
+              '轮次 ' + (round + 1) + '/' + maxRounds
+            );
             let out = '';
             const missing = this.missingRequiredArgs(fn, args);
+            const signature = fn + '\n' + JSON.stringify(args);
+            const occurrences = (callCounts.get(signature) || 0) + 1;
+            callCounts.set(signature, occurrences);
+            const repeated = occurrences >= 3;
+            const tooManyCalls = totalToolCalls >= maxToolCalls;
+            const tooLong = Date.now() - toolStartedAt >= maxToolMs;
             if (badJson) {
               out = '参数不是合法 JSON（' + badJson + '），请重新调用这个工具并传合法的 arguments。';
               card.fail(out);
             } else if (missing.length) {
               out = '缺少必填参数：' + missing.join('、') + '。请重新调用这个工具并补齐这些参数。';
               card.fail(out);
+            } else if (repeated) {
+              forceFinal = true;
+              limitReason = limitReason || '检测到同一工具和相同参数重复调用';
+              out = '已阻止重复工具调用：相同工具和参数已经执行过两次。请基于已有结果作答。';
+              card.fail(out);
+            } else if (tooManyCalls) {
+              forceFinal = true;
+              limitReason = limitReason || '总工具调用次数已达到 ' + maxToolCalls + ' 次上限';
+              out = limitReason + '，本次工具未执行。请基于已有结果作答。';
+              card.fail(out);
+            } else if (tooLong) {
+              forceFinal = true;
+              limitReason = limitReason || '工具运行时间已达到 ' + Math.round(maxToolMs / 60000) + ' 分钟上限';
+              out = limitReason + '，本次工具未执行。请基于已有结果作答。';
+              card.fail(out);
             } else {
+              totalToolCalls++;
               try {
                 if (this.plugin.mcp.has(fn)) {
                   const invokeMcp = async () => {
@@ -5119,7 +5168,9 @@ class ChatView extends ItemView {
       let cleanedAcc = (acc || '').replace(/<[\/｜|]*DSML[｜|]*>[\s\S]*$/gi, '').trim();
       const finalText =
         cleanedAcc ||
-        '（工具调用轮数用完了，模型没能给出结论。可以在设置里把「自动调用工具上限」调大，或把问题问得更窄一点。）';
+        (limitReason
+          ? '（' + limitReason + '，模型没有返回阶段总结。可以检查已完成的操作，或提高相应上限后继续。）'
+          : '（最大连续工具轮次已用完，模型没有返回结论。可以提高轮次上限，或把问题拆小。）');
       assistantMsg.content = [{ type: 'text', text: finalText }];
       holder.empty();
       await this.renderAssistantText(holder, finalText);
@@ -5705,13 +5756,39 @@ class AIChatProSettingTab extends PluginSettingTab {
       );
 
     new Setting(box)
-      .setName('自动调用工具上限')
-      .setDesc('一轮对话里最多自动连续调用几次工具，值越大越贵')
+      .setName('最大连续工具轮次')
+      .setDesc('每轮可包含多个工具调用；达到上限后会要求模型停止调用并给出阶段结果')
       .addText((t) =>
         t.setValue(String(s.maxAutoIterations)).onChange(async (v) => {
           const n = parseInt(v, 10);
-          if (!isNaN(n) && n >= 1 && n <= 20) {
+          if (!isNaN(n) && n >= 1 && n <= 30) {
             s.maxAutoIterations = n;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(box)
+      .setName('总工具调用上限')
+      .setDesc('单次用户请求内最多实际执行多少个工具，默认 20')
+      .addText((t) =>
+        t.setValue(String(s.maxToolCalls || 20)).onChange(async (v) => {
+          const n = parseInt(v, 10);
+          if (!isNaN(n) && n >= 1 && n <= 100) {
+            s.maxToolCalls = n;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(box)
+      .setName('工具运行时长上限')
+      .setDesc('分钟。达到上限后停止新工具调用，并要求模型总结已有结果')
+      .addText((t) =>
+        t.setValue(String(s.maxToolMinutes || 5)).onChange(async (v) => {
+          const n = parseInt(v, 10);
+          if (!isNaN(n) && n >= 1 && n <= 30) {
+            s.maxToolMinutes = n;
             await this.plugin.saveSettings();
           }
         })
@@ -6660,7 +6737,9 @@ class AIChatProPlugin extends Plugin {
     this.mcp = new McpManager(this);
     this.bridge = new BridgeServer(this);
     this.skills = new SkillStore(this);
-    if (this._removedLegacyTemplates || this._migratedSkillRoot) await this.saveSettings();
+    if (this._removedLegacyTemplates || this._migratedSkillRoot || this._migratedToolBudget) {
+      await this.saveSettings();
+    }
     if (this.settings.bridge.enabled) {
       try {
         await this.bridge.start();
@@ -6924,6 +7003,9 @@ class AIChatProPlugin extends Plugin {
 
   async loadSettings() {
     const data = (await this.loadData()) || {};
+    this._migratedToolBudget =
+      !Object.prototype.hasOwnProperty.call(data, 'maxToolCalls') &&
+      Number(data.maxAutoIterations) === 6;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
     this._removedLegacyTemplates = Object.prototype.hasOwnProperty.call(this.settings, 'templates');
     if (this._removedLegacyTemplates) delete this.settings.templates;
@@ -6957,6 +7039,16 @@ class AIChatProPlugin extends Plugin {
     } catch (e) {
       this.settings.bridge.writeRoot = 'MarginMuse Agent Output';
     }
+    this.settings.maxAutoIterations = Math.max(
+      1,
+      Math.min(30, Number(this.settings.maxAutoIterations) || 8)
+    );
+    if (this._migratedToolBudget) this.settings.maxAutoIterations = 8;
+    this.settings.maxToolCalls = Math.max(1, Math.min(100, Number(this.settings.maxToolCalls) || 20));
+    this.settings.maxToolMinutes = Math.max(
+      1,
+      Math.min(30, Number(this.settings.maxToolMinutes) || 5)
+    );
   }
 
   async saveSettings() {
